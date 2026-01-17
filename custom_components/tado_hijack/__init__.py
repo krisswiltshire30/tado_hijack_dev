@@ -29,7 +29,12 @@ __version__ = "1.0.0"
 # Type alias for easier access in platforms
 type TadoConfigEntry = ConfigEntry[TadoDataUpdateCoordinator]
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.SWITCH, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.SENSOR,
+    Platform.SWITCH,
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool:

@@ -18,13 +18,24 @@ from homeassistant.const import CONF_SCAN_INTERVAL
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+)
 
 from .const import (
+    CONF_DISABLE_POLLING_WHEN_THROTTLED,
+    CONF_OFFSET_POLL_INTERVAL,
     CONF_REFRESH_TOKEN,
     CONF_SLOW_POLL_INTERVAL,
+    CONF_THROTTLE_THRESHOLD,
+    DEFAULT_OFFSET_POLL_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLOW_POLL_INTERVAL,
+    DEFAULT_THROTTLE_THRESHOLD,
     DOMAIN,
+    MIN_OFFSET_POLL_INTERVAL,
     MIN_SCAN_INTERVAL,
     MIN_SLOW_POLL_INTERVAL,
 )
@@ -146,6 +157,15 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                     CONF_REFRESH_TOKEN: self.refresh_token,
                     CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
                     CONF_SLOW_POLL_INTERVAL: user_input[CONF_SLOW_POLL_INTERVAL],
+                    CONF_OFFSET_POLL_INTERVAL: user_input.get(
+                        CONF_OFFSET_POLL_INTERVAL, DEFAULT_OFFSET_POLL_INTERVAL
+                    ),
+                    CONF_THROTTLE_THRESHOLD: user_input.get(
+                        CONF_THROTTLE_THRESHOLD, DEFAULT_THROTTLE_THRESHOLD
+                    ),
+                    CONF_DISABLE_POLLING_WHEN_THROTTLED: user_input.get(
+                        CONF_DISABLE_POLLING_WHEN_THROTTLED, False
+                    ),
                 },
             )
 
@@ -159,6 +179,21 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                     vol.Required(
                         CONF_SLOW_POLL_INTERVAL, default=DEFAULT_SLOW_POLL_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SLOW_POLL_INTERVAL)),
+                    vol.Optional(
+                        CONF_OFFSET_POLL_INTERVAL, default=DEFAULT_OFFSET_POLL_INTERVAL
+                    ): vol.All(
+                        vol.Coerce(int), vol.Range(min=MIN_OFFSET_POLL_INTERVAL)
+                    ),
+                    vol.Optional(
+                        CONF_THROTTLE_THRESHOLD, default=DEFAULT_THROTTLE_THRESHOLD
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_DISABLE_POLLING_WHEN_THROTTLED, default=False
+                    ): bool,
                 }
             ),
         )
@@ -195,9 +230,13 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
     ) -> ConfigFlowResult:
         """Initialize the options flow."""
         if user_input:
-            result = self.async_create_entry(data=user_input)
+            # Update entry.data directly (not options) so coordinator sees changes
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data={**self.config_entry.data, **user_input},
+            )
             await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-            return result
+            return self.async_create_entry(data={})
 
         return self.async_show_form(
             step_id="init",
@@ -215,6 +254,30 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                             CONF_SLOW_POLL_INTERVAL, DEFAULT_SLOW_POLL_INTERVAL
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SLOW_POLL_INTERVAL)),
+                    vol.Optional(
+                        CONF_OFFSET_POLL_INTERVAL,
+                        default=self.config_entry.data.get(
+                            CONF_OFFSET_POLL_INTERVAL, DEFAULT_OFFSET_POLL_INTERVAL
+                        ),
+                    ): vol.All(
+                        vol.Coerce(int), vol.Range(min=MIN_OFFSET_POLL_INTERVAL)
+                    ),
+                    vol.Optional(
+                        CONF_THROTTLE_THRESHOLD,
+                        default=self.config_entry.data.get(
+                            CONF_THROTTLE_THRESHOLD, DEFAULT_THROTTLE_THRESHOLD
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                        )
+                    ),
+                    vol.Optional(
+                        CONF_DISABLE_POLLING_WHEN_THROTTLED,
+                        default=self.config_entry.data.get(
+                            CONF_DISABLE_POLLING_WHEN_THROTTLED, False
+                        ),
+                    ): bool,
                 }
             ),
         )

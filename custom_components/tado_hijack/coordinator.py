@@ -17,9 +17,14 @@ if TYPE_CHECKING:
     from . import TadoConfigEntry
 
 from .const import (
+    CONF_DISABLE_POLLING_WHEN_THROTTLED,
+    CONF_OFFSET_POLL_INTERVAL,
     CONF_REFRESH_TOKEN,
     CONF_SLOW_POLL_INTERVAL,
+    CONF_THROTTLE_THRESHOLD,
+    DEFAULT_OFFSET_POLL_INTERVAL,
     DEFAULT_SLOW_POLL_INTERVAL,
+    DEFAULT_THROTTLE_THRESHOLD,
     DOMAIN,
     OPTIMISTIC_GRACE_PERIOD_S,
 )
@@ -43,20 +48,39 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
     ):
         """Initialize Tado coordinator."""
         self._tado = client
+
+        # scan_interval = 0 means no periodic polling
+        update_interval = (
+            timedelta(seconds=scan_interval) if scan_interval > 0 else None
+        )
+
         super().__init__(
             hass,
             _LOGGER,
             config_entry=entry,
             name=DOMAIN,
-            update_interval=timedelta(seconds=scan_interval),
+            update_interval=update_interval,
         )
         self._refresh_token = entry.data.get(CONF_REFRESH_TOKEN)
+
+        # Throttle Configuration (0 = disabled, >0 = throttle when remaining < threshold)
+        self._throttle_threshold: int = int(
+            entry.data.get(CONF_THROTTLE_THRESHOLD, DEFAULT_THROTTLE_THRESHOLD)
+        )
+        self._disable_polling_when_throttled: bool = bool(
+            entry.data.get(CONF_DISABLE_POLLING_WHEN_THROTTLED, False)
+        )
+        self._internal_remaining: int = 100  # Will be synced from headers
 
         # Initialize Managers
         slow_poll_s = (
             entry.data.get(CONF_SLOW_POLL_INTERVAL, DEFAULT_SLOW_POLL_INTERVAL) * 3600
         )
-        self.data_manager = TadoDataManager(self, client, slow_poll_s)
+        offset_poll_s = (
+            entry.data.get(CONF_OFFSET_POLL_INTERVAL, DEFAULT_OFFSET_POLL_INTERVAL)
+            * 3600
+        )
+        self.data_manager = TadoDataManager(self, client, slow_poll_s, offset_poll_s)
         self.api_manager = TadoApiManager(hass, self)
 
         # State Tracking
@@ -73,6 +97,41 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
     def zones_meta_public(self):
         """Return the zones metadata."""
         return self.zones_meta
+
+    @property
+    def is_throttled(self) -> bool:
+        """Return True if throttled mode is active based on threshold and remaining calls."""
+        # threshold = 0 means throttling is disabled
+        if self._throttle_threshold == 0:
+            return False
+        # Otherwise throttle when remaining drops below threshold
+        return self._internal_remaining < self._throttle_threshold
+
+    @property
+    def api_status(self) -> str:
+        """Return current API status for sensor."""
+        remaining = self._internal_remaining
+        if remaining <= 0:
+            return "rate_limited"
+        return "throttled" if self.is_throttled else "connected"
+
+    def decrement_internal_remaining(self, count: int = 1) -> None:
+        """Decrement internal remaining counter (used in throttled mode)."""
+        self._internal_remaining = max(0, self._internal_remaining - count)
+        _LOGGER.debug("Internal remaining decremented to %d", self._internal_remaining)
+
+    def sync_remaining_from_headers(self) -> None:
+        """Sync internal remaining from actual API headers."""
+        header_remaining = int(
+            RATE_LIMIT_DATA.get("remaining", self._internal_remaining)
+        )
+        if header_remaining != self._internal_remaining:
+            _LOGGER.debug(
+                "Syncing internal remaining: %d -> %d",
+                self._internal_remaining,
+                header_remaining,
+            )
+            self._internal_remaining = header_remaining
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch update via DataManager."""
@@ -97,11 +156,15 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
 
             self._cleanup_optimistic()
 
-            # Inject real-time RateLimit
+            # Sync internal remaining from headers
+            self.sync_remaining_from_headers()
+
+            # Inject real-time RateLimit and API status
             data["rate_limit"] = RateLimit(
                 limit=int(RATE_LIMIT_DATA.get("limit", 0)),
-                remaining=int(RATE_LIMIT_DATA.get("remaining", 0)),
+                remaining=self._internal_remaining,
             )
+            data["api_status"] = self.api_status
             return data
         except TadoError as err:
             raise UpdateFailed(f"Tado API error: {err}") from err
@@ -126,11 +189,13 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         await self.async_refresh()
 
     def update_rate_limit_local(self, silent: bool = False) -> None:
-        """Update local stats."""
+        """Update local stats and sync internal remaining from headers."""
+        self.sync_remaining_from_headers()
         self.data["rate_limit"] = RateLimit(
             limit=int(RATE_LIMIT_DATA.get("limit", 0)),
-            remaining=int(RATE_LIMIT_DATA.get("remaining", 0)),
+            remaining=self._internal_remaining,
         )
+        self.data["api_status"] = self.api_status
         if not silent:
             self.async_update_listeners()
 

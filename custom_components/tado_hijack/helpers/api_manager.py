@@ -76,15 +76,18 @@ class TadoApiManager:
     async def _worker_loop(self) -> None:
         """Background loop to process the queue sequentially."""
         types_in_batch: set[str] = set()
+        commands_in_batch: int = 0
 
         while True:
             try:
                 type_key, target_func = await self._api_queue.get()
                 types_in_batch.add(type_key)
+                commands_in_batch += 1
 
                 _LOGGER.debug("Worker: Executing %s command", type_key)
                 try:
                     await target_func()
+                    # Sync from headers if available (passive update)
                     self.coordinator.update_rate_limit_local(silent=True)
                 except Exception as e:
                     _LOGGER.error("Worker: Command failed: %s", e)
@@ -93,11 +96,23 @@ class TadoApiManager:
 
                 # Batch confirmation after final command
                 if self._api_queue.empty():
-                    _LOGGER.debug(
-                        "Worker: Batch complete, syncing types: %s", types_in_batch
-                    )
-                    await self.coordinator.async_sync_states(list(types_in_batch))
+                    if self.coordinator.is_throttled:
+                        # Throttled mode: skip refresh, just decrement internal counter
+                        _LOGGER.debug(
+                            "Worker: Batch complete (throttled mode), "
+                            "skipping refresh for %d commands",
+                            commands_in_batch,
+                        )
+                        self.coordinator.decrement_internal_remaining(commands_in_batch)
+                        self.coordinator.update_rate_limit_local(silent=False)
+                    else:
+                        # Normal mode: sync states from API
+                        _LOGGER.debug(
+                            "Worker: Batch complete, syncing types: %s", types_in_batch
+                        )
+                        await self.coordinator.async_sync_states(list(types_in_batch))
                     types_in_batch.clear()
+                    commands_in_batch = 0
 
             except asyncio.CancelledError:
                 _LOGGER.debug("API worker loop cancelled")

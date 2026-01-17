@@ -101,7 +101,8 @@
     "release-test",
     {
       "name": "dev",
-      "prerelease": true
+      "channel": "dev",
+      "prerelease": "dev"
     }
   ]
 }
