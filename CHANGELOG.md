@@ -1,3 +1,21 @@
+## [2.0.0-dev.1](https://github.com/banter240/tado_hijack/compare/v1.1.0...v2.0.0-dev.1) (2026-01-20)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** The integration now maps entities to physical devices instead of zones. Config flow and polling intervals have been updated.
+
+### ✨ New Features
+
+* feat(core): complete architecture overhaul and feature enhancement
+
+- Migrated to inheritance model (TadoHijackClient)
+- Implemented smart batching for API efficiency
+- Added HomeKit device linking via serial number
+- Added Child Lock and global Boost/Off controls
+- Hardened logging security and PII redaction
+- Removed redundant code and optimized polling
+- Overhauled documentation and API table
+
 ## [1.1.0](https://github.com/banter240/tado_hijack/compare/v1.0.0...v1.1.0) (2026-01-17)
 
 ### ✨ New Features
