@@ -1,3 +1,21 @@
+## [3.0.0](https://github.com/banter240/tado_hijack/compare/v2.0.0...v3.0.0) (2026-01-20)
+
+### ⚠ BREAKING CHANGES
+
+* **offset:** The 'sensor.temperature_offset' entities have been replaced by 'number.temperature_offset' to enable write access.
+
+### ✨ New Features
+
+* feat(offset): implement bi-directional temperature offset control
+
+- Architecture: Integrated set_temperature_offset directly into TadoHijackClient (Inheritance over Monkeypatching).
+- Controls: Replaced legacy read-only offset sensors with interactive 'number' entities (-10.0 to +10.0 in 0.1 steps).
+- UI: Configured entities in BOX mode for direct numeric input and added full English/German translations.
+- UX: Integrated with OptimisticManager and ApiManager for flicker-free, debounced (5s) API execution.
+- Reliability: Implemented RestoreEntity support to preserve calibration states across Home Assistant restarts.
+- Quality: Resolved mypy static analysis errors and optimized setup logic via Sourcery/Ruff.
+- Docs: Updated documentation and removed redundant API information.
+
 ## [2.0.0](https://github.com/banter240/tado_hijack/compare/v1.1.0...v2.0.0) (2026-01-20)
 
 ### ⚠ BREAKING CHANGES
