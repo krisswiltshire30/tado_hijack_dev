@@ -42,6 +42,11 @@ class RateLimitManager:
         return "throttled" if self.is_throttled else "connected"
 
     @property
+    def throttle_threshold(self) -> int:
+        """Return the configured throttle threshold."""
+        return self._throttle_threshold
+
+    @property
     def remaining(self) -> int:
         """Return estimated remaining calls."""
         return self._internal_remaining

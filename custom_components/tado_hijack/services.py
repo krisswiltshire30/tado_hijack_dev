@@ -12,6 +12,7 @@ from .const import (
     SERVICE_BOOST_ALL_ZONES,
     SERVICE_MANUAL_POLL,
     SERVICE_RESUME_ALL_SCHEDULES,
+    SERVICE_SET_TIMER,
     SERVICE_TURN_OFF_ALL_ZONES,
 )
 
@@ -47,6 +48,38 @@ async def async_setup_services(
         _LOGGER.debug("Service call: boost_all_zones")
         await coordinator.async_boost_all_zones()
 
+    async def handle_set_timer(call: ServiceCall) -> None:
+        """Service to set a manual overlay with duration (batched)."""
+        entity_ids = call.data.get("entity_id")
+        if not entity_ids:
+            return
+
+        if isinstance(entity_ids, str):
+            entity_ids = [entity_ids]
+
+        duration = int(call.data.get("duration", 30))
+        power = call.data.get("power", "ON")
+        temperature = call.data.get("temperature")
+
+        # Resolve all zone IDs first
+        zone_ids: list[int] = []
+        for entity_id in entity_ids:
+            if zone_id := coordinator.get_zone_id_from_entity(entity_id):
+                zone_ids.append(zone_id)
+            else:
+                _LOGGER.warning("Could not resolve Tado zone for entity %s", entity_id)
+
+        if not zone_ids:
+            return
+
+        # Batch operation - The coordinator and ApiManager handle the fusion
+        await coordinator.async_set_multiple_zone_overlays(
+            zone_ids=zone_ids,
+            power=power,
+            temperature=temperature,
+            duration=duration,
+        )
+
     hass.services.async_register(DOMAIN, SERVICE_MANUAL_POLL, handle_manual_poll)
     hass.services.async_register(
         DOMAIN, SERVICE_RESUME_ALL_SCHEDULES, handle_resume_schedules
@@ -55,6 +88,7 @@ async def async_setup_services(
         DOMAIN, SERVICE_TURN_OFF_ALL_ZONES, handle_turn_off_all
     )
     hass.services.async_register(DOMAIN, SERVICE_BOOST_ALL_ZONES, handle_boost_all)
+    hass.services.async_register(DOMAIN, SERVICE_SET_TIMER, handle_set_timer)
 
 
 async def async_unload_services(hass: HomeAssistant) -> None:
@@ -63,3 +97,4 @@ async def async_unload_services(hass: HomeAssistant) -> None:
     hass.services.async_remove(DOMAIN, SERVICE_RESUME_ALL_SCHEDULES)
     hass.services.async_remove(DOMAIN, SERVICE_TURN_OFF_ALL_ZONES)
     hass.services.async_remove(DOMAIN, SERVICE_BOOST_ALL_ZONES)
+    hass.services.async_remove(DOMAIN, SERVICE_SET_TIMER)

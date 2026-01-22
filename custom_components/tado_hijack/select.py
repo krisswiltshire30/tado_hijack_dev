@@ -30,9 +30,6 @@ async def async_setup_entry(
         if zone.type != "AIR_CONDITIONING":
             continue
 
-        # Get capabilities for the zone
-        # We use the first mode's capabilities as a proxy for available options
-        # In a real scenario, we might need to merge capabilities from all modes
         capabilities = coordinator.data.get("capabilities", {}).get(zone.id)
         if not capabilities:
             continue

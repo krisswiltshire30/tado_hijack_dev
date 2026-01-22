@@ -41,19 +41,51 @@ class TadoRequestHandler:
         method: HttpMethod = HttpMethod.GET,
         proxy_url: str | None = None,
     ) -> str:
-        """Execute a robust request mimicking browser behavior."""
+        """Execute a robust request mimicking browser behavior.
+
+        NOTE: This method accesses private tadoasync APIs (_refresh_auth, _access_token,
+        _request_timeout, _ensure_session) as they're not exposed publicly but necessary
+        for custom request handling. If tadoasync changes these internals, errors will
+        be logged and handled gracefully.
+        """
         # Only refresh auth if NOT using a proxy (proxy handles auth)
         if not proxy_url:
-            await instance._refresh_auth()  # noqa: SLF001
+            if hasattr(instance, "_refresh_auth"):
+                await instance._refresh_auth()  # noqa: SLF001
+            else:
+                _LOGGER.warning(
+                    "_refresh_auth not found in Tado instance (library may have changed)"
+                )
 
         url = self._build_url(uri, endpoint, proxy_url)
-        headers = self._build_headers(instance._access_token, method)  # noqa: SLF001
+
+        # Get access token (private API with fallback)
+        access_token = getattr(instance, "_access_token", None)
+        if access_token is None:
+            _LOGGER.error(
+                "_access_token not found in Tado instance (library may have changed)"
+            )
+            raise TadoConnectionError("Cannot access Tado authentication token")
+
+        headers = self._build_headers(access_token, method)
 
         _LOGGER.debug("Tado Request: %s %s (Proxy: %s)", method.value, url, proxy_url)
 
+        # Get timeout (private API with fallback)
+        request_timeout = getattr(instance, "_request_timeout", 10)
+
         try:
-            async with asyncio.timeout(instance._request_timeout):  # noqa: SLF001
-                session = instance._ensure_session()  # noqa: SLF001
+            async with asyncio.timeout(request_timeout):
+                # Get session (private API with fallback)
+                if hasattr(instance, "_ensure_session"):
+                    session = instance._ensure_session()  # noqa: SLF001
+                elif hasattr(instance, "_session") and instance._session is not None:
+                    session = instance._session  # noqa: SLF001
+                else:
+                    _LOGGER.error(
+                        "Cannot access session from Tado instance (library may have changed)"
+                    )
+                    raise TadoConnectionError("Cannot access HTTP session")
 
                 request_kwargs: dict[str, Any] = {
                     "method": method.value,
@@ -85,15 +117,7 @@ class TadoRequestHandler:
     ) -> URL:
         """Construct URL handling query parameters manually to avoid encoding issues."""
         if proxy_url:
-            # Proxy handles base URL. We assume proxy_url points to root (e.g. http://localhost:8080)
-            # Tado API paths start with /api/v2
-            # EIQ paths start with /api
-            # We need to map endpoint to correct path on proxy if proxy mirrors structure.
-            # Proxy doc says: "Replace https://my.tado.com with http://localhost:8080 in your API calls."
-            # and "http://localhost:8080/api/v2/me".
-            # So we just swap the host part.
-
-            # Parse proxy URL to get scheme/host/port
+            # Map endpoint to correct path on proxy
             parsed_proxy = URL(proxy_url)
 
             if endpoint == EIQ_HOST_URL:

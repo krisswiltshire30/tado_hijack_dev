@@ -27,6 +27,7 @@ from homeassistant.helpers.selector import (
 from .const import (
     CONF_API_PROXY_URL,
     CONF_DEBOUNCE_TIME,
+    CONF_DEBUG_LOGGING,
     CONF_DISABLE_POLLING_WHEN_THROTTLED,
     CONF_OFFSET_POLL_INTERVAL,
     CONF_REFRESH_TOKEN,
@@ -80,7 +81,9 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
         """Handle the initial step."""
         if self.tado is None:
             try:
-                self.tado = Tado(debug=True, session=async_get_clientsession(self.hass))
+                self.tado = Tado(
+                    debug=False, session=async_get_clientsession(self.hass)
+                )
                 await self.tado.async_init()
             except TadoError:
                 _LOGGER.exception("Error initiating Tado")
@@ -174,6 +177,7 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                         CONF_DEBOUNCE_TIME, DEFAULT_DEBOUNCE_TIME
                     ),
                     CONF_API_PROXY_URL: user_input.get(CONF_API_PROXY_URL),
+                    CONF_DEBUG_LOGGING: user_input.get(CONF_DEBUG_LOGGING, False),
                 },
             )
 
@@ -205,7 +209,8 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                     vol.Optional(
                         CONF_DEBOUNCE_TIME, default=DEFAULT_DEBOUNCE_TIME
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DEBOUNCE_TIME)),
-                    vol.Optional(CONF_API_PROXY_URL): str,
+                    vol.Optional(CONF_API_PROXY_URL): vol.Any(None, str),
+                    vol.Optional(CONF_DEBUG_LOGGING, default=False): bool,
                 }
             ),
         )
@@ -299,7 +304,11 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                     vol.Optional(
                         CONF_API_PROXY_URL,
                         default=self.config_entry.data.get(CONF_API_PROXY_URL, ""),
-                    ): str,
+                    ): vol.Any(None, str),
+                    vol.Optional(
+                        CONF_DEBUG_LOGGING,
+                        default=self.config_entry.data.get(CONF_DEBUG_LOGGING, False),
+                    ): bool,
                 }
             ),
         )

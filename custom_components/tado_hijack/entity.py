@@ -78,7 +78,7 @@ class TadoHomeEntity(TadoEntity):
 
             # Use first bridge for metadata
             if name == self.coordinator.config_entry.title:
-                name = f"tado Internet Bridge {bridge.serial_no}"
+                name = f"tado Internet Bridge connection {bridge.serial_no}"
                 model = bridge.device_type
                 sw_version = bridge.current_fw_version
 
@@ -142,7 +142,6 @@ class TadoDeviceEntity(TadoEntity):
         self._zone_id = zone_id
         self._fw_version = fw_version
 
-        # Try to find existing HomeKit device to link to
         self._linked_identifiers = get_homekit_identifiers(coordinator.hass, serial_no)
 
     @property

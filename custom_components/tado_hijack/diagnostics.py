@@ -62,12 +62,12 @@ def _get_coordinator_diagnostics(
     }
 
     if coordinator.data:
-        # Redact potentially sensitive data from the API response
+        # Redact sensitive data from API response
         coordinator_diag["data"] = async_redact_data(
             coordinator.data, DIAGNOSTICS_TO_REDACT_DATA_KEYS
         )
 
-    # Sanitize metadata
+    # Clean metadata
     if coordinator.zones_meta:
         coordinator_diag["zones_meta"] = async_redact_data(
             {str(k): v for k, v in coordinator.zones_meta.items()},

@@ -16,6 +16,7 @@ CONF_THROTTLE_THRESHOLD: Final = "throttle_threshold"
 CONF_DISABLE_POLLING_WHEN_THROTTLED: Final = "disable_polling_when_throttled"
 CONF_DEBOUNCE_TIME: Final = "debounce_time"
 CONF_API_PROXY_URL: Final = "api_proxy_url"
+CONF_DEBUG_LOGGING: Final = "debug_logging"
 
 # Default Intervals
 DEFAULT_SCAN_INTERVAL: Final = 3600
@@ -42,10 +43,11 @@ INITIAL_RATE_LIMIT_GUESS: Final = 100  # Pessimistic initial guess
 SLOW_POLL_CYCLE_S: Final = 86400  # 24 Hours in seconds
 
 # Service Names
-SERVICE_MANUAL_POLL: Final = "manual_poll"
-SERVICE_RESUME_ALL_SCHEDULES: Final = "resume_all_schedules"
-SERVICE_TURN_OFF_ALL_ZONES: Final = "turn_off_all_zones"
-SERVICE_BOOST_ALL_ZONES: Final = "boost_all_zones"
+SERVICE_MANUAL_POLL = "manual_poll"
+SERVICE_RESUME_ALL_SCHEDULES = "resume_all_schedules"
+SERVICE_TURN_OFF_ALL_ZONES = "turn_off_all_zones"
+SERVICE_BOOST_ALL_ZONES = "boost_all_zones"
+SERVICE_SET_TIMER = "set_timer"
 
 # Device Capabilities
 CAPABILITY_INSIDE_TEMP: Final = "INSIDE_TEMPERATURE_MEASUREMENT"

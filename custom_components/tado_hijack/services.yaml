@@ -14,3 +14,43 @@ manual_poll:
 
 resume_all_schedules:
   description: "Resume smart schedule for all heating zones."
+
+turn_off_all_zones:
+  description: "Turn off all heating zones."
+
+boost_all_zones:
+  description: "Boost all heating zones to 25°C."
+
+set_timer:
+  description: "Set a manual overlay with a timer duration."
+  fields:
+    entity_id:
+      description: "Any Tado Hijack zone entity (e.g. switch.hot_water_power or climate.living_room)."
+      required: true
+      selector:
+        entity:
+          integration: tado_hijack
+    duration:
+      description: "Duration in minutes after which the timer ends."
+      required: true
+      selector:
+        number:
+          min: 1
+          max: 720
+          unit_of_measurement: "min"
+    power:
+      description: "Power state during timer (ON/OFF)."
+      default: "ON"
+      selector:
+        select:
+          options:
+            - "ON"
+            - "OFF"
+    temperature:
+      description: "Target temperature (optional, for Heating/AC)."
+      selector:
+        number:
+          min: 5
+          max: 30
+          step: 0.1
+          unit_of_measurement: "°C"

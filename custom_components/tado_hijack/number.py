@@ -55,9 +55,13 @@ async def async_setup_entry(
 
         # Target Temperature per Zone (AC or Hot Water)
         if zone.type in ("AIR_CONDITIONING", "HOT_WATER"):
-            entities.append(
-                TadoTargetTempNumberEntity(coordinator, zone.id, zone.name, zone.type)
-            )
+            capabilities = coordinator.data.get("capabilities", {}).get(zone.id)
+            if capabilities and getattr(capabilities, "temperatures", None):
+                entities.append(
+                    TadoTargetTempNumberEntity(
+                        coordinator, zone.id, zone.name, zone.type
+                    )
+                )
 
         # Away Temperature per Zone (Heating only)
         if zone.type == "HEATING":
@@ -220,13 +224,14 @@ class TadoTargetTempNumberEntity(
         super().__init__(coordinator, key, zone_id, zone_name)
         self._zone_type = zone_type
 
-        # Set ranges based on type
-        if zone_type == "HOT_WATER":
-            self._attr_native_min_value = 30.0
-            self._attr_native_max_value = 70.0
-        else:  # AC
-            self._attr_native_min_value = 16.0
-            self._attr_native_max_value = 30.0
+        self._attr_native_min_value = 30.0 if zone_type == "HOT_WATER" else 16.0
+        self._attr_native_max_value = 70.0 if zone_type == "HOT_WATER" else 30.0
+
+        capabilities = coordinator.data.get("capabilities", {}).get(zone_id)
+        if capabilities and capabilities.temperatures:
+            self._attr_native_min_value = float(capabilities.temperatures.celsius.min)
+            self._attr_native_max_value = float(capabilities.temperatures.celsius.max)
+            self._attr_native_step = float(capabilities.temperatures.celsius.step)
 
         self._attr_unique_id = f"zone_{zone_id}_target_temp"
 
@@ -242,13 +247,15 @@ class TadoTargetTempNumberEntity(
     async def async_set_native_value(self, value: float) -> None:
         """Set a new target temperature."""
         if self._zone_type == "HOT_WATER":
-            # Reuse HW power method but with temp logic?
-            # Tado API needs temperature field in setting.
-            # I need to ensure coordinator supports this.
-            # For now, we assume SET_OVERLAY handles it if temperature is in data.
-            await self.coordinator.async_set_zone_heat(self._zone_id, temp=value)
+            # Use optimistic_value=False so HW switch shows ON (not False = True)
+            await self.coordinator.async_set_zone_overlay(
+                self._zone_id,
+                power="ON",
+                temperature=value,
+                overlay_type="HOT_WATER",
+                optimistic_value=False,
+            )
         else:
-            # For AC, we reuse async_set_ac_setting or similar
             await self.coordinator.async_set_ac_setting(
                 self._zone_id, "temperature", str(value)
             )

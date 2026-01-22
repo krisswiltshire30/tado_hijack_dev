@@ -41,7 +41,6 @@ class TadoDataManager:
         self.offsets_cache: dict[str, TemperatureOffset] = {}
         self.away_cache: dict[int, float] = {}
         self._last_slow_poll: float = 0
-        # Start timers at boot time to prevent immediate fetch
         self._last_offset_poll: float = time.monotonic()
         self._last_away_poll: float = time.monotonic()
         self._offset_invalidated: bool = False
@@ -51,7 +50,7 @@ class TadoDataManager:
         """Perform a data fetch using fast/slow track logic."""
         current_time = time.monotonic()
 
-        # Batteries & Metadata
+        # 1. Slow Track: Update metadata and device list periodically
         if (
             not self.zones_meta
             or (current_time - self._last_slow_poll) > self._slow_poll_seconds
@@ -62,7 +61,7 @@ class TadoDataManager:
             self.zones_meta = {zone.id: zone for zone in zones}
             self.devices_meta = {dev.short_serial_no: dev for dev in devices}
 
-            # Fetch capabilities for AC and Hot Water zones
+            # Capabilities for AC and Hot Water
             for zone in zones:
                 if zone.type in ("AIR_CONDITIONING", "HOT_WATER"):
                     try:
@@ -74,14 +73,14 @@ class TadoDataManager:
                             "Failed to fetch capabilities for zone %d: %s", zone.id, err
                         )
 
-            # Find Internet Bridge devices for linking
+            # Discover bridge devices
             self.coordinator.bridges = [
                 dev for dev in devices if dev.device_type.startswith("IB")
             ]
 
             self._last_slow_poll = current_time
 
-        # Temperature offsets
+        # 2. Medium Track: Update temperature offsets
         if self._offset_invalidated or (
             self._offset_poll_seconds > 0
             and (current_time - self._last_offset_poll) > self._offset_poll_seconds
@@ -90,13 +89,13 @@ class TadoDataManager:
             self._last_offset_poll = current_time
             self._offset_invalidated = False
 
-        # Away configurations
+        # 3. Medium Track: Update away configurations
         if self._away_invalidated:
             await self._fetch_away_config()
             self._last_away_poll = current_time
             self._away_invalidated = False
 
-        # States
+        # 4. Fast Track: Current states
         _LOGGER.debug("DataManager: Fetching fast-track states")
         home_state = await self._tado.get_home_state()
         zone_states = await self._tado.get_zone_states()
@@ -141,7 +140,6 @@ class TadoDataManager:
             if CAPABILITY_INSIDE_TEMP in (dev.characteristics.capabilities or [])
         ]
 
-        # Filter out disabled entities to save API calls
         active_devices = []
         for dev in devices_with_temp:
             unique_id = f"{dev.serial_no}_temperature_offset"
@@ -183,7 +181,6 @@ class TadoDataManager:
             z for z in self.zones_meta.values() if getattr(z, "type", "") == "HEATING"
         ]
 
-        # Filter out disabled entities to save API calls
         active_zones = []
         for zone in heating_zones:
             unique_id = f"zone_{zone.id}_away_temperature"

@@ -147,10 +147,52 @@ class OptimisticManager:
 
         opt = self.zones[zone_id]
         if (time.monotonic() - opt.get("time", 0)) < OPTIMISTIC_GRACE_PERIOD_S:
-            val = opt.get("open_window")
-            return cast("bool", val) if val is not None else None
+            return cast("bool", opt.get("open_window"))
 
         return None
+
+    def clear_presence(self) -> None:
+        """Clear optimistic presence state (for rollback)."""
+        self.presence = None
+        self.presence_time = 0
+
+    def clear_zone(self, zone_id: int) -> None:
+        """Clear optimistic zone state (for rollback)."""
+        self.zones.pop(zone_id, None)
+
+    def clear_child_lock(self, serial_no: str) -> None:
+        """Clear optimistic child lock state (for rollback)."""
+        if serial_no in self.devices and "child_lock" in self.devices[serial_no]:
+            del self.devices[serial_no]["child_lock"]
+            if not self.devices[serial_no]:
+                del self.devices[serial_no]
+
+    def clear_offset(self, serial_no: str) -> None:
+        """Clear optimistic offset state (for rollback)."""
+        if serial_no in self.devices and "offset" in self.devices[serial_no]:
+            del self.devices[serial_no]["offset"]
+            if not self.devices[serial_no]:
+                del self.devices[serial_no]
+
+    def clear_away_temp(self, zone_id: int) -> None:
+        """Clear optimistic away temperature state (for rollback)."""
+        if zone_id in self.zones and "away_temp" in self.zones[zone_id]:
+            del self.zones[zone_id]["away_temp"]
+
+    def clear_dazzle(self, zone_id: int) -> None:
+        """Clear optimistic dazzle mode (for rollback)."""
+        if zone_id in self.zones and "dazzle" in self.zones[zone_id]:
+            del self.zones[zone_id]["dazzle"]
+
+    def clear_early_start(self, zone_id: int) -> None:
+        """Clear optimistic early start (for rollback)."""
+        if zone_id in self.zones and "early_start" in self.zones[zone_id]:
+            del self.zones[zone_id]["early_start"]
+
+    def clear_open_window(self, zone_id: int) -> None:
+        """Clear optimistic open window (for rollback)."""
+        if zone_id in self.zones and "open_window" in self.zones[zone_id]:
+            del self.zones[zone_id]["open_window"]
 
     def cleanup(self) -> None:
         """Clear expired optimistic states."""

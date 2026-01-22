@@ -11,7 +11,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from tadoasync import TadoAuthenticationError
 
-from .const import CONF_API_PROXY_URL, CONF_REFRESH_TOKEN, DEFAULT_SCAN_INTERVAL
+from .const import (
+    CONF_API_PROXY_URL,
+    CONF_DEBUG_LOGGING,
+    CONF_REFRESH_TOKEN,
+    DEFAULT_SCAN_INTERVAL,
+)
 from .coordinator import TadoDataUpdateCoordinator
 from .helpers.client import TadoHijackClient
 from .helpers.logging_utils import TadoRedactionFilter
@@ -74,6 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
 
     scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     proxy_url = entry.data.get(CONF_API_PROXY_URL)
+    debug_logging = entry.data.get(CONF_DEBUG_LOGGING, False)
 
     if proxy_url:
         _LOGGER.info("Using Tado API Proxy at %s", proxy_url)
@@ -81,7 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     client = TadoHijackClient(
         refresh_token=entry.data[CONF_REFRESH_TOKEN],
         session=async_get_clientsession(hass),
-        debug=True,
+        debug=debug_logging,
         proxy_url=proxy_url,
     )
 
@@ -92,8 +98,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
         raise ConfigEntryAuthFailed from e
     except Exception as e:
         _LOGGER.error("Failed to initialize Tado API: %s", e)
-        if "Bad Request" in str(e) or "400" in str(e):
-            _LOGGER.warning("Token likely invalid (400 Bad Request), triggering reauth")
+        # Check for HTTP 400/401 status codes or authentication-related errors
+        error_str = str(e).lower()
+        if (
+            "bad request" in error_str
+            or "400" in error_str
+            or "401" in error_str
+            or "unauthorized" in error_str
+            or ("invalid" in error_str and "token" in error_str)
+        ):
+            _LOGGER.warning(
+                "Token likely invalid (HTTP 400/401 or auth error), triggering reauth"
+            )
             raise ConfigEntryAuthFailed from e
         return False
 

@@ -47,13 +47,27 @@ class TadoApiManager:
             )
             _LOGGER.debug("TadoApiManager background worker task started")
 
+    def shutdown(self) -> None:
+        """Stop the worker task and cancel all pending timers."""
+        # Cancel worker task
+        if self._worker_task and not self._worker_task.done():
+            self._worker_task.cancel()
+            _LOGGER.debug("TadoApiManager worker task cancelled")
+
+        # Cancel all pending timers
+        for key, cancel_fn in list(self._pending_timers.items()):
+            cancel_fn()
+            _LOGGER.debug("Cancelled pending timer for '%s'", key)
+        self._pending_timers.clear()
+        self._action_queue.clear()
+
     def queue_command(self, key: str, command: TadoCommand) -> None:
         """Add a command to the debounce queue (per-key debounce)."""
         _LOGGER.debug("Queue: Requesting command '%s' (%s)", key, command.cmd_type)
-        # Cancel existing timer for THIS key
-        if key in self._pending_timers:
+        # Cancel existing timer for THIS key (defensive pop)
+        if cancel_fn := self._pending_timers.pop(key, None):
             _LOGGER.debug("Queue: Cancelling existing timer for '%s'", key)
-            self._pending_timers.pop(key)()
+            cancel_fn()
 
         self._action_queue[key] = command
         _LOGGER.debug(
@@ -88,21 +102,22 @@ class TadoApiManager:
 
         while True:
             try:
-                # Fetch first item (blocking)
+                # 1. Fetch first item (blocking)
                 cmd = await self._api_queue.get()
                 batch.append(cmd)
                 self._api_queue.task_done()
 
-                # Linger to catch stragglers
+                # 2. Linger to catch stragglers
+                # Wait briefly to see if more commands arrive
                 await asyncio.sleep(BATCH_LINGER_S)
 
-                # Drain queue (non-blocking)
+                # 3. Drain queue (non-blocking)
                 while not self._api_queue.empty():
                     cmd = self._api_queue.get_nowait()
                     batch.append(cmd)
                     self._api_queue.task_done()
 
-                # Process the batch
+                # 4. Process the batch
                 if batch:
                     _LOGGER.debug("Worker: Processing batch of %d commands", len(batch))
                     await self._process_batch(batch)
@@ -117,45 +132,49 @@ class TadoApiManager:
 
     async def _process_batch(self, commands: list[TadoCommand]) -> None:
         """Smartly merge and execute a batch of commands."""
+        # 1. Consolidated state via merger
         merger = CommandMerger(self.coordinator.zones_meta)
         for cmd in commands:
             merger.add(cmd)
 
         merged = merger.result
 
-        # Execute Presence (Global, independent)
+        # 2. Execute Presence (Global, independent)
         if merged["presence"]:
             _LOGGER.debug("Worker: Setting presence to %s", merged["presence"])
             try:
                 await self.coordinator.client.set_presence(merged["presence"])
             except Exception as e:
                 _LOGGER.error("Failed to set presence: %s", e)
+                # Rollback optimistic state on error
+                self.coordinator.optimistic.clear_presence()
+                self.coordinator.async_update_listeners()
 
-        # Execute Child Lock Actions
+        # 3. Execute Child Lock Actions
         await self._execute_child_locks(merged["child_lock"])
 
-        # Execute Offset Actions
+        # 4. Execute Offset Actions
         await self._execute_offset_actions(merged["offsets"])
 
-        # Execute Away Temp Actions
+        # 5. Execute Away Temp Actions
         await self._execute_away_actions(merged["away_temps"])
 
-        # Execute Dazzle Actions
+        # 6. Execute Dazzle Actions
         await self._execute_dazzle_actions(merged["dazzle_modes"])
 
-        # Execute Early Start Actions
+        # 7. Execute Early Start Actions
         await self._execute_early_start_actions(merged["early_starts"])
 
-        # Execute Open Window Actions
+        # 8. Execute Open Window Actions
         await self._execute_open_window_actions(merged["open_windows"])
 
-        # Execute Identify Actions
+        # 9. Execute Identify Actions
         await self._execute_identify_actions(merged["identifies"])
 
-        # Execute Zone Actions (Bulk)
+        # 10. Execute Zone Actions (Bulk)
         await self._execute_zone_actions(merged["zones"])
 
-        # Manual Poll / Update Rate Limit
+        # 11. Post-execution sync & Rate limit update
         self.coordinator.update_rate_limit_local(silent=False)
 
         if merged["manual_poll"]:
@@ -164,77 +183,103 @@ class TadoApiManager:
         elif self.coordinator.rate_limit.is_throttled:
             self.coordinator.rate_limit.decrement(len(commands))
 
+    async def _execute_device_actions(
+        self,
+        actions: dict[str, Any],
+        action_name: str,
+        api_call: Any,
+        rollback_fn: Any,
+    ) -> None:
+        """Execute device-specific actions with rollback (DRY helper).
+
+        Args:
+            actions: Dict mapping serial_no to value
+            action_name: Human-readable action name for logging
+            api_call: Async function to call for each action
+            rollback_fn: Function to call on error for rollback
+
+        """
+        for serial, value in actions.items():
+            _LOGGER.debug("Worker: %s for %s: %s", action_name, serial, value)
+            try:
+                await api_call(serial, value)
+            except Exception as e:
+                _LOGGER.error("Failed to %s for %s: %s", action_name, serial, e)
+                rollback_fn(serial)
+                self.coordinator.async_update_listeners()
+
     async def _execute_child_locks(self, actions: dict[str, bool]) -> None:
         """Execute child lock actions sequentially."""
-        for serial, enabled in actions.items():
-            _LOGGER.debug("Worker: Setting child lock for %s to %s", serial, enabled)
-            try:
-                await self.coordinator.client.set_child_lock(serial, child_lock=enabled)
-            except Exception as e:
-                _LOGGER.error("Failed to set child lock for %s: %s", serial, e)
+        await self._execute_device_actions(
+            actions=actions,
+            action_name="set child lock",
+            api_call=lambda serial, enabled: self.coordinator.client.set_child_lock(
+                serial, child_lock=enabled
+            ),
+            rollback_fn=self.coordinator.optimistic.clear_child_lock,
+        )
 
     async def _execute_offset_actions(self, actions: dict[str, float]) -> None:
         """Execute offset actions sequentially."""
-        for serial, offset in actions.items():
-            _LOGGER.debug(
-                "Worker: Setting temperature offset for %s to %.1f", serial, offset
-            )
+        await self._execute_device_actions(
+            actions=actions,
+            action_name="set temperature offset",
+            api_call=self.coordinator.client.set_temperature_offset,
+            rollback_fn=self.coordinator.optimistic.clear_offset,
+        )
+
+    async def _execute_zone_property_actions(
+        self,
+        actions: dict[int, Any],
+        action_name: str,
+        api_call: Any,
+        rollback_fn: Any,
+    ) -> None:
+        """Execute zone-specific property actions with rollback (DRY helper)."""
+        for zone_id, value in actions.items():
+            _LOGGER.debug("Worker: %s for zone %d: %s", action_name, zone_id, value)
             try:
-                await self.coordinator.client.set_temperature_offset(serial, offset)
+                await api_call(zone_id, value)
             except Exception as e:
-                _LOGGER.error("Failed to set temperature offset for %s: %s", serial, e)
+                _LOGGER.error("Failed to %s for zone %d: %s", action_name, zone_id, e)
+                rollback_fn(zone_id)
+                self.coordinator.async_update_listeners()
 
     async def _execute_away_actions(self, actions: dict[int, float]) -> None:
         """Execute away temperature actions sequentially."""
-        for zone_id, temp in actions.items():
-            _LOGGER.debug(
-                "Worker: Setting away temperature for zone %d to %.1f", zone_id, temp
-            )
-            try:
-                await self.coordinator.client.set_away_configuration(zone_id, temp)
-            except Exception as e:
-                _LOGGER.error(
-                    "Failed to set away temperature for zone %d: %s", zone_id, e
-                )
+        await self._execute_zone_property_actions(
+            actions=actions,
+            action_name="set away temperature",
+            api_call=self.coordinator.client.set_away_configuration,
+            rollback_fn=self.coordinator.optimistic.clear_away_temp,
+        )
 
     async def _execute_dazzle_actions(self, actions: dict[int, bool]) -> None:
         """Execute dazzle mode actions sequentially."""
-        for zone_id, enabled in actions.items():
-            _LOGGER.debug(
-                "Worker: Setting dazzle mode for zone %d to %s", zone_id, enabled
-            )
-            try:
-                await self.coordinator.client.set_dazzle_mode(zone_id, enabled)
-            except Exception as e:
-                _LOGGER.error("Failed to set dazzle mode for zone %d: %s", zone_id, e)
+        await self._execute_zone_property_actions(
+            actions=actions,
+            action_name="set dazzle mode",
+            api_call=self.coordinator.client.set_dazzle_mode,
+            rollback_fn=self.coordinator.optimistic.clear_dazzle,
+        )
 
     async def _execute_early_start_actions(self, actions: dict[int, bool]) -> None:
         """Execute early start actions sequentially."""
-        for zone_id, enabled in actions.items():
-            _LOGGER.debug(
-                "Worker: Setting early start for zone %d to %s", zone_id, enabled
-            )
-            try:
-                await self.coordinator.client.set_early_start(zone_id, enabled)
-            except Exception as e:
-                _LOGGER.error("Failed to set early start for zone %d: %s", zone_id, e)
+        await self._execute_zone_property_actions(
+            actions=actions,
+            action_name="set early start",
+            api_call=self.coordinator.client.set_early_start,
+            rollback_fn=self.coordinator.optimistic.clear_early_start,
+        )
 
     async def _execute_open_window_actions(self, actions: dict[int, bool]) -> None:
         """Execute open window detection actions sequentially."""
-        for zone_id, enabled in actions.items():
-            _LOGGER.debug(
-                "Worker: Setting open window detection for zone %d to %s",
-                zone_id,
-                enabled,
-            )
-            try:
-                await self.coordinator.client.set_open_window_detection(
-                    zone_id, enabled
-                )
-            except Exception as e:
-                _LOGGER.error(
-                    "Failed to set open window detection for zone %d: %s", zone_id, e
-                )
+        await self._execute_zone_property_actions(
+            actions=actions,
+            action_name="set open window detection",
+            api_call=self.coordinator.client.set_open_window_detection,
+            rollback_fn=self.coordinator.optimistic.clear_open_window,
+        )
 
     async def _execute_identify_actions(self, actions: set[str]) -> None:
         """Execute identify actions sequentially."""
@@ -264,6 +309,10 @@ class TadoApiManager:
                 await self.coordinator.client.reset_all_zones_overlay(resumes)
             except Exception as e:
                 _LOGGER.error("Failed to bulk resume: %s", e)
+                # Rollback optimistic state on error
+                for zone_id in resumes:
+                    self.coordinator.optimistic.clear_zone(zone_id)
+                self.coordinator.async_update_listeners()
 
         if overlays:
             _LOGGER.debug("Worker: Bulk setting %d overlays", len(overlays))
@@ -271,3 +320,7 @@ class TadoApiManager:
                 await self.coordinator.client.set_all_zones_overlay(overlays)
             except Exception as e:
                 _LOGGER.error("Failed to bulk overlay: %s", e)
+                # Rollback optimistic state on error
+                for overlay in overlays:
+                    self.coordinator.optimistic.clear_zone(overlay["room"])
+                self.coordinator.async_update_listeners()

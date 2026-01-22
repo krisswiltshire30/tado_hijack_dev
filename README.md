@@ -44,6 +44,9 @@ While other integrations waste your precious API quota for every tiny click, Tad
 >
 > *Note: This works within your configurable **Debounce Window**. Every action is automatically fused.*
 
+> [!IMPORTANT]
+> **Everything is Batched:** This technology applies to both manual dashboard interactions AND service calls (like `set_timer`). If your automation triggers 10 timers at once, Tado Hijack will still only send **one single API call**.
+
 ### 🤝 The HomeKit "Missing Link"
 **We don't replace HomeKit. We fix it.**
 Almost no other integration does this: Tado Hijack automatically detects your existing HomeKit devices and **injects** the missing cloud-only power-features directly into them.
@@ -144,6 +147,8 @@ Unlike other integrations that group everything by "Zone", Tado Hijack maps enti
 | **Slow Polling** | `24h` | Interval for battery and device metadata. |
 | **Debounce Time**| `5s` | **Batching Window:** Fuses actions into single calls. |
 | **Throttle Threshold** | `0` | Auto-skip calls when quota is dangerously low. |
+| **Disable Polling When Throttled** | `Off` | Stop periodic polling entirely when throttled. |
+| **Debug Logging** | `Off` | Enable verbose logging for troubleshooting. |
 | **API Proxy URL** | `None` | **Advanced:** URL of local `tado-api-proxy` workaround. |
 
 ---
@@ -164,7 +169,8 @@ Global controls for the entire home. *Will be linked to your Internet Bridge dev
 | `button.refresh_away` | Button | Fetches all zone away temps (M calls). |
 | `button.full_manual_poll` | Button | **Expensive:** Refreshes everything at once. |
 | `sensor.api_calls_remaining` | Sensor | Your precious daily API gold. |
-| `sensor.api_status` | Sensor | Connection health (`connected`, `throttled`). |
+| `sensor.api_status` | Sensor | API status (`connected`, `throttled`, `rate_limited`). |
+| `binary_sensor.bridge_connection` | Binary Sensor | Bridge connectivity to Tado cloud. |
 
 ### 🌡️ Zone Devices (Rooms / Hot Water / AC)
 Cloud-only features that HomeKit does not support.
@@ -180,7 +186,7 @@ Cloud-only features that HomeKit does not support.
 | `select.fan_speed` | Select | **AC Only:** Full fan speed control. |
 | `select.swing` | Select | **AC Only:** Full swing control. |
 | `sensor.heating_power` | Sensor | **Insight:** Valve opening percentage. |
-| `sensor.humidity` | Sensor | **AC Only:** Humidity reported by AC unit. |
+| `sensor.humidity` | Sensor | Zone humidity (faster than HomeKit's slow local polling). |
 | `button.resume_schedule` | Button | Force resume schedule (stateless). |
 
 ### 🔧 Physical Devices (Valves/Thermostats)
@@ -189,6 +195,7 @@ Hardware-specific entities. *These entities are **injected** into your existing 
 | Entity | Type | Description |
 | :--- | :--- | :--- |
 | `binary_sensor.battery` | Binary Sensor | Battery health (Normal/Low). |
+| `binary_sensor.connection` | Binary Sensor | Device connectivity to Tado cloud. |
 | `switch.child_lock` | Switch | Toggle Child Lock on the device. |
 | `switch.dazzle_mode` | Switch | Control display behavior (V3+). |
 | `number.temperature_offset` | Number | Interactive temperature calibration (-10 to +10°C). |
@@ -202,6 +209,38 @@ For advanced automation, use these services:
 *   `tado_hijack.boost_all_zones`
 *   `tado_hijack.resume_all_schedules`
 *   `tado_hijack.manual_poll` (Supports `refresh_type`: `metadata`, `offsets`, `away`, `all`)
+*   `tado_hijack.set_timer` (Set Power, Temp, and **Timer Duration** in one efficient call)
+
+> [!TIP]
+> **Targeting Rooms:** You can use **any** entity that belongs to a room as the `entity_id`. This includes Tado Hijack switches or even your existing **HomeKit climate** entities (e.g. `climate.living_room`). The service will automatically resolve the correct Tado zone.
+
+#### 📝 `set_timer` Examples (YAML)
+
+**Hot Water Boost (30 Min):**
+```yaml
+service: tado_hijack.set_timer
+data:
+  entity_id: switch.hot_water  # Targets the Hot Water zone
+  duration: 30
+```
+
+**Quick Bathroom Heat (15 Min at 24°C):**
+```yaml
+service: tado_hijack.set_timer
+data:
+  entity_id: climate.bathroom  # Targets the Heating zone via HomeKit entity
+  duration: 15
+  temperature: 24
+```
+
+**AC Sleep Timer (1 Hour at 21°C):**
+```yaml
+service: tado_hijack.set_timer
+data:
+  entity_id: select.bedroom_fan_speed  # Targets the AC zone via any AC entity
+  duration: 60
+  temperature: 21
+```
 
 ---
 

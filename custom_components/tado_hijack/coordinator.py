@@ -20,7 +20,6 @@ from homeassistant.const import (
     ATTR_ENTITY_ID,
     EVENT_CALL_SERVICE,
 )
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from tadoasync import Tado, TadoError
 
@@ -50,7 +49,7 @@ from .helpers.logging_utils import get_redacted_logger
 from .helpers.optimistic_manager import OptimisticManager
 from .helpers.patch import get_handler
 from .helpers.rate_limit_manager import RateLimitManager
-from .models import CommandType, RateLimit, TadoCommand
+from .models import CommandType, RateLimit, TadoCommand, TadoCoordinatorData
 
 _LOGGER = get_redacted_logger(__name__)
 
@@ -166,10 +165,42 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         """Return the Tado client."""
         return cast("TadoHijackClient", self._tado)
 
+    def get_zone_id_from_entity(self, entity_id: str) -> int | None:
+        """Resolve a Tado zone ID from any entity ID (HomeKit or Hijack)."""
+        # 1. Check HomeKit mapping
+        if zone_id := self._climate_to_zone.get(entity_id):
+            return zone_id
+
+        # 2. Check Hijack registry
+        from homeassistant.helpers import entity_registry as er
+
+        ent_reg = er.async_get(self.hass)
+        if entry := ent_reg.async_get(entity_id):
+            return self._parse_zone_id_from_unique_id(entry.unique_id)
+
+        return None
+
+    def _parse_zone_id_from_unique_id(self, unique_id: str) -> int | None:
+        """Extract zone ID from unique_id with support for multiple formats."""
+        try:
+            parts = unique_id.split("_")
+            # Pattern: {entry_id}_..._{zone_id}
+            if parts[-1].isdigit():
+                return int(parts[-1])
+            # Pattern: zone_{zone_id}
+            if len(parts) >= 2 and parts[-2] == "zone" and parts[-1].isdigit():
+                return int(parts[-1])
+        except (ValueError, IndexError, AttributeError):
+            pass
+        return None
+
     def _is_zone_disabled(self, zone_id: int) -> bool:
         """Check if the zone control is disabled by user."""
         if not self.config_entry:
             return False
+
+        from homeassistant.helpers import entity_registry as er
+
         ent_reg = er.async_get(self.hass)
         unique_id = f"{self.config_entry.entry_id}_sch_{zone_id}"
         if entity_id := ent_reg.async_get_entity_id("switch", DOMAIN, unique_id):
@@ -178,19 +209,39 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
                 return True
         return False
 
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch update via DataManager."""
+    async def _async_update_data(self) -> TadoCoordinatorData:
+        """Fetch update via DataManager.
+
+        Handles throttling logic by skipping API calls if quota is low and
+        the feature is enabled.
+        """
+        # 1. Check if polling should be disabled when throttled
+        if self._disable_polling_when_throttled and self.rate_limit.is_throttled:
+            _LOGGER.warning(
+                "Polling disabled due to throttling (remaining: %d, threshold: %d)",
+                self.rate_limit.remaining,
+                self.rate_limit.throttle_threshold,
+            )
+            # Return existing data without making new API calls
+            if self.data:
+                return cast(TadoCoordinatorData, self.data)
+            # If no data exists yet, allow first fetch
+            _LOGGER.info("No data exists, allowing initial fetch despite throttling")
+
         try:
+            # 2. Execute full data fetch
             data = await self.data_manager.fetch_full_update()
 
+            # 3. Synchronize metadata
             self.zones_meta = self.data_manager.zones_meta
             self.devices_meta = self.data_manager.devices_meta
             self._update_climate_map()
 
+            # 4. Maintenance tasks
             self.auth_manager.check_and_update_token()
-
             self.optimistic.cleanup()
 
+            # 5. Rate limit tracking
             self.rate_limit.sync_from_headers()
 
             data["rate_limit"] = RateLimit(
@@ -198,7 +249,8 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
                 remaining=self.rate_limit.remaining,
             )
             data["api_status"] = self.rate_limit.api_status
-            return data
+
+            return cast(TadoCoordinatorData, data)
         except TadoError as err:
             raise UpdateFailed(f"Tado API error: {err}") from err
 
@@ -207,6 +259,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         if self._unsub_listener:
             self._unsub_listener()
             self._unsub_listener = None
+
+        # Cleanup API manager (worker task + pending timers)
+        self.api_manager.shutdown()
 
     async def _execute_manual_poll(self, refresh_type: str = "all") -> None:
         """Execute the manual poll logic (worker target)."""
@@ -251,7 +306,10 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def async_set_zone_heat(self, zone_id: int, temp: float = 25.0):
-        """Set zone to manual heat mode."""
+        """Set zone to manual mode with temperature."""
+        zone = self.zones_meta.get(zone_id)
+        overlay_type = getattr(zone, "type", "HEATING") if zone else "HEATING"
+
         self.optimistic.set_zone(zone_id, True)
         self.async_update_listeners()
         self.api_manager.queue_command(
@@ -261,7 +319,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
                 zone_id=zone_id,
                 data={
                     "setting": {
-                        "type": "HEATING",
+                        "type": overlay_type,
                         "power": "ON",
                         "temperature": {"celsius": temp},
                     },
@@ -426,6 +484,104 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
             ),
         )
 
+    async def async_set_zone_overlay(
+        self,
+        zone_id: int,
+        power: str = "ON",
+        temperature: float | None = None,
+        duration: int | None = None,
+        overlay_type: str | None = None,
+        optimistic_value: bool = True,
+    ) -> None:
+        """Set a manual overlay with timer/duration support."""
+        data = self._build_overlay_data(
+            zone_id=zone_id,
+            power=power,
+            temperature=temperature,
+            duration=duration,
+            overlay_type=overlay_type,
+        )
+
+        # Optimistic Update
+        self.optimistic.set_zone(zone_id, optimistic_value)
+        self.async_update_listeners()
+
+        # Queue Command
+        self.api_manager.queue_command(
+            f"zone_{zone_id}",
+            TadoCommand(
+                CommandType.SET_OVERLAY,
+                zone_id=zone_id,
+                data=data,
+            ),
+        )
+
+    def _build_overlay_data(
+        self,
+        zone_id: int,
+        power: str = "ON",
+        temperature: float | None = None,
+        duration: int | None = None,
+        overlay_type: str | None = None,
+    ) -> dict[str, Any]:
+        """Build the overlay data dictionary (DRY helper)."""
+        # 1. Determine Type
+        if not overlay_type:
+            zone = self.zones_meta.get(zone_id)
+            overlay_type = getattr(zone, "type", "HEATING") if zone else "HEATING"
+
+        # 2. Build Termination
+        termination: dict[str, Any] = {"typeSkillBasedApp": "MANUAL"}
+        if duration:
+            termination = {
+                "typeSkillBasedApp": "TIMER",
+                "durationInSeconds": duration * 60,
+            }
+
+        # 3. Build Setting
+        setting: dict[str, Any] = {"type": overlay_type, "power": power}
+        if temperature is not None and power == "ON":
+            setting["temperature"] = {"celsius": temperature}
+
+        return {"setting": setting, "termination": termination}
+
+    async def async_set_multiple_zone_overlays(
+        self,
+        zone_ids: list[int],
+        power: str = "ON",
+        temperature: float | None = None,
+        duration: int | None = None,
+    ) -> None:
+        """Set manual overlays for multiple zones in a single batched process."""
+        if not zone_ids:
+            return
+
+        _LOGGER.debug("Batched set_timer requested for zones: %s", zone_ids)
+
+        # 1. Trigger Optimistic Updates for all zones
+        for zone_id in zone_ids:
+            self.optimistic.set_zone(zone_id, True)
+        self.async_update_listeners()
+
+        # 2. Queue Commands
+        # The ApiManager will automatically merge these because they are queued
+        # in the same execution cycle (before the debounce timer expires).
+        for zone_id in zone_ids:
+            data = self._build_overlay_data(
+                zone_id=zone_id,
+                power=power,
+                temperature=temperature,
+                duration=duration,
+            )
+            self.api_manager.queue_command(
+                f"zone_{zone_id}",
+                TadoCommand(
+                    CommandType.SET_OVERLAY,
+                    zone_id=zone_id,
+                    data=data,
+                ),
+            )
+
     async def async_resume_all_schedules(self) -> None:
         """Resume all zone schedules using bulk API endpoint (single call)."""
         _LOGGER.debug("Resume all schedules triggered")
@@ -458,86 +614,70 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
     async def async_turn_off_all_zones(self) -> None:
         """Turn off all heating zones using bulk API endpoint."""
         _LOGGER.debug("Turn off all zones triggered")
-        if not self.zones_meta:
-            _LOGGER.warning("No zones to turn off")
-            return
-
-        overlays = [
-            {
-                "overlay": {
-                    "setting": {"power": "OFF", "type": "HEATING"},
-                    "termination": {"typeSkillBasedApp": "MANUAL"},
-                },
-                "room": zone_id,
-            }
-            for zone_id, zone in self.zones_meta.items()
-            if getattr(zone, "type", "HEATING") == "HEATING"
-            and not self._is_zone_disabled(zone_id)
-        ]
-        if not overlays:
-            _LOGGER.warning("No active heating zones to turn off")
-            return
-
-        # Optimistic update (UI Feedback)
-        for item in overlays:
-            self.optimistic.set_zone(cast(int, item["room"]), True)
-        self.async_update_listeners()
-
-        _LOGGER.info("Queued turn off for %d active zones", len(overlays))
-
-        for item in overlays:
-            zone_id = cast(int, item["room"])
-            self.api_manager.queue_command(
-                f"zone_{zone_id}",
-                TadoCommand(
-                    CommandType.SET_OVERLAY,
-                    zone_id=zone_id,
-                    data=cast(dict[str, Any], item["overlay"]),
-                ),
-            )
+        self._apply_bulk_zone_overlay(
+            command_key="turn_off_all",
+            setting={"power": "OFF", "type": "HEATING"},
+            action_name="turn off",
+        )
 
     async def async_boost_all_zones(self) -> None:
         """Boost all heating zones (25C) via bulk API."""
         _LOGGER.debug("Boost all zones triggered")
+        self._apply_bulk_zone_overlay(
+            command_key="boost_all",
+            setting={
+                "power": "ON",
+                "type": "HEATING",
+                "temperature": {"celsius": BOOST_MODE_TEMP},
+            },
+            action_name="boost",
+        )
+
+    def _apply_bulk_zone_overlay(
+        self,
+        command_key: str,
+        setting: dict[str, Any],
+        action_name: str,
+    ) -> None:
+        """Apply same overlay setting to all heating zones (DRY helper).
+
+        Args:
+            command_key: Unique key for API command queue
+            setting: Overlay setting dict (power, type, temperature)
+            action_name: Human-readable action name for logging
+
+        """
         if not self.zones_meta:
-            _LOGGER.warning("No zones to boost")
+            _LOGGER.warning("No zones to %s", action_name)
             return
 
-        overlays = [
-            {
-                "overlay": {
-                    "setting": {
-                        "power": "ON",
-                        "type": "HEATING",
-                        "temperature": {"celsius": BOOST_MODE_TEMP},
-                    },
-                    "termination": {"typeSkillBasedApp": "MANUAL"},
-                },
-                "room": zone_id,
-            }
+        zone_ids = [
+            zone_id
             for zone_id, zone in self.zones_meta.items()
             if getattr(zone, "type", "HEATING") == "HEATING"
             and not self._is_zone_disabled(zone_id)
         ]
-        if not overlays:
-            _LOGGER.warning("No active heating zones to boost")
+
+        if not zone_ids:
+            _LOGGER.warning("No active heating zones to %s", action_name)
             return
 
         # Optimistic update (UI Feedback)
-        for item in overlays:
-            self.optimistic.set_zone(cast(int, item["room"]), True)
+        for zone_id in zone_ids:
+            self.optimistic.set_zone(zone_id, True)
         self.async_update_listeners()
 
-        _LOGGER.info("Queued boost for %d active zones", len(overlays))
+        _LOGGER.info("Queued %s for %d active zones", action_name, len(zone_ids))
 
-        # Send individual commands to allow filtering
-        for item in overlays:
-            zone_id = cast(int, item["room"])
+        for zone_id in zone_ids:
             self.api_manager.queue_command(
                 f"zone_{zone_id}",
                 TadoCommand(
                     CommandType.SET_OVERLAY,
                     zone_id=zone_id,
-                    data=cast(dict[str, Any], item["overlay"]),
+                    data={
+                        "setting": setting,
+                        "termination": {"typeSkillBasedApp": "MANUAL"},
+                    },
                 ),
             )

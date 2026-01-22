@@ -71,8 +71,8 @@ async def async_setup_entry(
         if zone.type == "HEATING":
             entities.append(TadoHeatingPowerSensor(coordinator, zone.id, zone.name))
 
-        # Humidity (Percentage) - AC only, TRVs get it via HomeKit
-        if zone.type == "AIR_CONDITIONING":
+        # Humidity (Percentage)
+        if zone.type in ("HEATING", "AIR_CONDITIONING"):
             entities.append(TadoHumiditySensor(coordinator, zone.id, zone.name))
 
     async_add_entities(entities)
@@ -147,7 +147,13 @@ class TadoHeatingPowerSensor(TadoZoneEntity, SensorEntity):
 
 
 class TadoHumiditySensor(TadoZoneEntity, SensorEntity):
-    """Sensor for Tado zone humidity."""
+    """Sensor for Tado zone humidity.
+
+    Why zone-level humidity when HomeKit has per-device humidity?
+    HomeKit humidity updates are extremely slow (local polling). This sensor
+    uses the Tado Cloud API which updates much faster and comes for free with
+    the regular state poll - no extra API calls needed.
+    """
 
     _attr_device_class = SensorDeviceClass.HUMIDITY
     _attr_native_unit_of_measurement = "%"

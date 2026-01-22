@@ -11,28 +11,53 @@ from .logging_utils import get_redacted_logger
 
 _LOGGER = get_redacted_logger(__name__)
 
+# Cache for device lookups (serial_no -> identifiers)
+_device_cache: dict[str, set[tuple[str, str]] | None] = {}
+_cache_built = False
 
-def get_homekit_identifiers(
-    hass: HomeAssistant, serial_no: str
-) -> set[tuple[str, str]] | None:
-    """Find a device in the registry matching the serial number and return its identifiers."""
+
+def _build_device_cache(hass: HomeAssistant) -> None:
+    """Build device cache from registry (called once per integration load)."""
+    global _cache_built
+    if _cache_built:
+        return
+
     registry = dr.async_get(hass)
+    _LOGGER.debug(
+        "Building device registry cache from %d devices", len(registry.devices)
+    )
 
-    # Search for a device with matching manufacturer and serial number
     for device in registry.devices.values():
         if (
             device.manufacturer
             and "tado" in device.manufacturer.lower()
-            and device.serial_number == serial_no
+            and device.serial_number
         ):
+            _device_cache[device.serial_number] = cast(
+                set[tuple[str, str]], device.identifiers
+            )
             _LOGGER.debug(
-                "Found existing HomeKit/Tado device for serial %s: %s",
-                serial_no,
+                "Cached device: serial=%s, name=%s",
+                device.serial_number,
                 device.name,
             )
-            return cast(set[tuple[str, str]], device.identifiers)
 
-    return None
+    _cache_built = True
+    _LOGGER.debug("Device cache built with %d Tado devices", len(_device_cache))
+
+
+def get_homekit_identifiers(
+    hass: HomeAssistant, serial_no: str
+) -> set[tuple[str, str]] | None:
+    """Find a device in the registry matching the serial number and return its identifiers.
+
+    Uses a cache to avoid O(n*m) complexity during setup.
+    """
+    # Build cache on first call
+    _build_device_cache(hass)
+
+    # Lookup from cache
+    return _device_cache.get(serial_no)
 
 
 def get_climate_entity_id(hass: HomeAssistant, serial_no: str) -> str | None:
