@@ -45,6 +45,8 @@ from .const import (
     DEFAULT_SLOW_POLL_INTERVAL,
     DEFAULT_THROTTLE_THRESHOLD,
     DOMAIN,
+    NIGHT_END_HOUR,
+    NIGHT_START_HOUR,
 )
 from .helpers.api_manager import TadoApiManager
 from .helpers.auth_manager import AuthManager
@@ -318,12 +320,17 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
 
         return reset_today
 
+    def _is_night_time(self, now: datetime) -> bool:
+        """Check if we are in the night/idle window."""
+        # Simple check: Is current hour >= START or < END?
+        # Example: 23:00 to 06:00.
+        # 23:00 -> True. 05:59 -> True. 06:00 -> False. 12:00 -> False.
+        return now.hour >= NIGHT_START_HOUR or now.hour < NIGHT_END_HOUR
+
     def _calculate_auto_quota_interval(self) -> int | None:
         """Calculate optimal polling interval based on quota settings.
 
-        Respects throttle threshold - if enabled and remaining calls drop below
-        threshold, polling is disabled or slowed significantly regardless of
-        auto quota settings.
+        Respects throttle threshold and night schedule.
 
         Returns:
             Interval in seconds, or None if auto quota is disabled
@@ -362,31 +369,30 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
             )
             return 3600
 
-        # Calculate FREE quota after all reservations
-        # 1. Throttle threshold (emergency reserve)
-        # 2. Scheduled updates (slow poll, offset poll) - measured, not hardcoded
+        # --- NIGHT SCHEDULE CHECK ---
+        if self._is_night_time(now):
+            # It is night time. We disable Auto Quota (Turbo) and fall back
+            # to the base interval (or stop if base is 0).
+            if self._base_scan_interval <= 0:
+                _LOGGER.info("Night Schedule: Base interval is 0, stopping polling.")
+                return None
+
+            _LOGGER.info(
+                "Night Schedule (%02d:00-%02d:00): Turbo disabled. Using base interval (%ds).",
+                NIGHT_START_HOUR,
+                NIGHT_END_HOUR,
+                self._base_scan_interval,
+            )
+            return self._base_scan_interval
+
+        # --- DAYTIME BUDGET PLANNING ---
+
+        # Calculate target API calls for the total day (percentage of limit)
+        # We apply the percentage to the USABLE quota (Total - Threshold)
+        # to ensure the threshold is strictly reserved.
         throttle_threshold = self.rate_limit.throttle_threshold
-        reserved_daily, reserved_breakdown = (
-            self.data_manager.estimate_daily_reserved_cost()
-        )
-
-        # FREE QUOTA = Limit - Throttle Reserve - Scheduled Updates
-        free_quota = max(0, limit - throttle_threshold - reserved_daily)
-
-        # Target = X% of FREE quota (not total!)
-        target_api_calls = int(free_quota * self._auto_api_quota_percent / 100)
-
-        _LOGGER.debug(
-            "Quota breakdown: Limit=%d, Throttle=%d, Reserved=%d (slow=%d, offset=%d), Free=%d, Target=%d%%=%d",
-            limit,
-            throttle_threshold,
-            reserved_daily,
-            reserved_breakdown.get("slow_poll_total", 0),
-            reserved_breakdown.get("offset_poll_total", 0),
-            free_quota,
-            self._auto_api_quota_percent,
-            target_api_calls,
-        )
+        usable_total_limit = max(0, limit - throttle_threshold)
+        target_api_calls = int(usable_total_limit * self._auto_api_quota_percent / 100)
 
         # Total calls used so far today
         used_total_calls = max(0, limit - remaining)
@@ -394,9 +400,30 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         # Total budget left for the rest of the day
         total_budget_left = max(0, target_api_calls - used_total_calls)
 
-        # Budget for fast polls = Total Budget Left
-        # (We trust the planner to account for expensive polls when they happen)
-        remaining_budget = max(0, total_budget_left)
+        # RESERVING BUDGET FOR NIGHT TIME:
+        # We must subtract the cost of polling during the night hours that fall
+        # within THIS quota cycle (before next reset).
+        # Since reset is at 12:00, the night (23:00-06:00) is ALWAYS upcoming.
+
+        # How many hours of night are left until reset?
+        night_duration_hours = (
+            24 - NIGHT_START_HOUR
+        ) + NIGHT_END_HOUR  # (24-23) + 6 = 7h
+
+        # Cost of night polling:
+        # If base interval is 0, night cost is 0 (no polling).
+        night_polling_cost = 0
+        if self._base_scan_interval > 0:
+            night_polls = (night_duration_hours * 3600) / self._base_scan_interval
+            # We assume a standard cost of ~2 for estimation, or use predicted cost.
+            # Using the planner prediction is safest.
+            night_polling_cost = int(
+                night_polls * self.data_manager.predict_next_poll_cost()
+            )
+
+        # Subtract night cost from total remaining budget
+        # This gives us the "Daytime Turbo Budget"
+        remaining_budget = max(0, total_budget_left - night_polling_cost)
 
         # Safety: Double check against absolute remaining minus threshold
         usable_remaining = max(0, remaining - throttle_threshold)
@@ -436,10 +463,11 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         bounded_interval = int(max(15, min(3600, adaptive_interval)))
 
         _LOGGER.info(
-            "Quota: Interval=%ds (Budget: %d/%d used, Next Cost: %d, Rem: %d calls -> %d polls, Reset in %.1fh)",
+            "Quota: Interval=%ds (Budget: %d/%d used, Night Reserve: %d, Next Cost: %d, Rem: %d calls -> %d polls, Reset in %.1fh)",
             bounded_interval,
             used_total_calls,
             target_api_calls,
+            night_polling_cost,
             predicted_cost,
             remaining_budget,
             int(remaining_polls),

@@ -50,6 +50,10 @@ SLOW_POLL_CYCLE_S: Final = 86400  # 24 Hours in seconds
 API_RESET_HOUR: Final = 12  # Hour when Tado resets API quota (CET/CEST)
 API_RESET_BUFFER_MINUTES: Final = 1  # Buffer after reset to ensure fresh data
 
+# Night Schedule (Hardcoded for now, later configurable)
+NIGHT_START_HOUR: Final = 23
+NIGHT_END_HOUR: Final = 6
+
 # Service Names
 SERVICE_MANUAL_POLL = "manual_poll"
 SERVICE_RESUME_ALL_SCHEDULES = "resume_all_schedules"
