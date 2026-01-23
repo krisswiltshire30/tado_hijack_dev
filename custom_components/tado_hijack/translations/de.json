@@ -106,6 +106,9 @@
       "heating_power": {
         "name": "Heizleistung"
       },
+      "hot_water_power": {
+        "name": "Warmwasser-Leistung"
+      },
       "humidity": {
         "name": "Luftfeuchtigkeit"
       }

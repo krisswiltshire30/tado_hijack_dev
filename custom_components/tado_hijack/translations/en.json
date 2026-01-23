@@ -106,6 +106,9 @@
       "heating_power": {
         "name": "Heating Power"
       },
+      "hot_water_power": {
+        "name": "Hot Water Power"
+      },
       "humidity": {
         "name": "Humidity"
       }

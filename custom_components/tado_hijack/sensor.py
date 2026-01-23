@@ -67,8 +67,8 @@ async def async_setup_entry(
 
     # Per-Zone Sensors
     for zone in coordinator.zones_meta.values():
-        # Heating Power (Percentage)
-        if zone.type == "HEATING":
+        # Heating Power (Percentage) - Heat request for TRVs or Boiler Load for Receivers
+        if zone.type in ("HEATING", "HOT_WATER"):
             entities.append(TadoHeatingPowerSensor(coordinator, zone.id, zone.name))
 
         # Humidity (Percentage)
@@ -132,7 +132,11 @@ class TadoHeatingPowerSensor(TadoZoneEntity, SensorEntity):
 
     def __init__(self, coordinator: Any, zone_id: int, zone_name: str) -> None:
         """Initialize heating power sensor."""
-        super().__init__(coordinator, "heating_power", zone_id, zone_name)
+        zone = coordinator.zones_meta.get(zone_id)
+        trans_key = (
+            "hot_water_power" if zone and zone.type == "HOT_WATER" else "heating_power"
+        )
+        super().__init__(coordinator, trans_key, zone_id, zone_name)
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_pwr_{zone_id}"
 
     @property
