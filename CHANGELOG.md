@@ -1,3 +1,14 @@
+## [3.1.0-dev.6](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.5...v3.1.0-dev.6) (2026-01-23)
+
+### 🐛 Bug Fixes
+
+* fix(hot_water): prevent optimistic ON state when resuming schedule
+
+- Corrected optimistic logic: 'Resume Schedule' no longer incorrectly assumes 'ON' state.
+- Enhanced OptimisticManager to track explicit power states ('ON'/'OFF') for accurate UI feedback.
+- Fixed coordinator to propagate correct power state during manual overlays.
+- docs: Clarified in README that HomeKit is mandatory for heating temperature control.
+
 ## [3.1.0-dev.5](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.4...v3.1.0-dev.5) (2026-01-23)
 
 ### ✨ New Features
