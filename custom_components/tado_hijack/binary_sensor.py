@@ -28,7 +28,7 @@ async def async_setup_entry(
     entities: list[BinarySensorEntity] = []
 
     for zone in coordinator.zones_meta.values():
-        if zone.type != "HEATING":
+        if zone.type not in ("HEATING", "AIR_CONDITIONING", "HOT_WATER"):
             continue
 
         for device in zone.devices:
