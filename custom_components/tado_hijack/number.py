@@ -247,13 +247,13 @@ class TadoTargetTempNumberEntity(
     async def async_set_native_value(self, value: float) -> None:
         """Set a new target temperature."""
         if self._zone_type == "HOT_WATER":
-            # Use optimistic_value=False so HW switch shows ON (not False = True)
+            # Use optimistic_value=True (Manual Overlay active) -> Schedule Switch shows OFF
             await self.coordinator.async_set_zone_overlay(
                 self._zone_id,
                 power="ON",
                 temperature=value,
                 overlay_type="HOT_WATER",
-                optimistic_value=False,
+                optimistic_value=True,
             )
         else:
             await self.coordinator.async_set_ac_setting(

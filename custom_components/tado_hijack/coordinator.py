@@ -730,6 +730,10 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator):
         if key != "temperature":
             setting[api_key_map.get(key, key)] = value
 
+        # Optimistic Update: Setting a value implies Manual Mode (Overlay) and Power ON
+        self.optimistic.set_zone(zone_id, True, power="ON")
+        self.async_update_listeners()
+
         self.api_manager.queue_command(
             f"zone_{zone_id}",
             TadoCommand(
