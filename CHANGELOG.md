@@ -1,3 +1,50 @@
+## [3.1.0-dev.5](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.4...v3.1.0-dev.5) (2026-01-23)
+
+### ✨ New Features
+
+* feat(quota): add Auto API Quota with adaptive polling
+
+Automatically distribute API calls throughout the day based on a
+configurable percentage of available quota. The system dynamically
+adjusts polling intervals to maximize freshness while respecting limits.
+
+Key changes:
+
+- Auto API Quota setting (0-100%) in config flow
+  Calculates FREE quota = Limit - Throttle - Battery - Offset updates
+  Distributes X% evenly until 12:05 CET reset
+
+- Adaptive interval calculation
+  Uses real poll cost measurement instead of hardcoded values
+  Respects throttle threshold - stops polling when quota low
+  Auto-adjusts based on remaining quota and time until reset
+
+- Scheduled reset poll at 12:05 CET
+  Fetches fresh quota data right after daily reset
+  Ensures accurate calculations for the new day
+
+- Hot Water zone resolution fix
+  Parse zone_{id}_suffix format correctly (e.g. zone_5_target_temp)
+
+- Config flow UX improvements
+  Reorder options: Fast Poll → Auto Quota → Battery → Offset → etc.
+  Move advanced options (Proxy, Debug) to bottom
+
+- README overhaul
+  Add Auto API Quota section with calculation example
+  Convert services list to table format
+  Fix German text, update API consumption table
+  General formatting and spacing improvements
+
+- Prevent duplicate patch application
+  Add idempotent guard to apply_patch()
+
+Technical notes:
+- PollTask abstraction for cost tracking
+- _build_poll_plan() as single source of truth
+- estimate_daily_reserved_cost() for budget planning
+- Europe/Berlin timezone for CET reset calculation
+
 ## [3.1.0-dev.4](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.3...v3.1.0-dev.4) (2026-01-23)
 
 ### 🐛 Bug Fixes
