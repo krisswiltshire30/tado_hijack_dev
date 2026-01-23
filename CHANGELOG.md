@@ -1,3 +1,12 @@
+## [3.1.0-dev.7](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.6...v3.1.0-dev.7) (2026-01-23)
+
+### 🐛 Bug Fixes
+
+* fix(core): resolve hot water logic and missing sensors
+
+- fix(hot_water): Prevent optimistic ON state when resuming schedule (logic fix).
+- fix(binary_sensor): Enable battery/connection sensors for devices in Hot Water/AC zones (e.g. Wireless Receivers).
+
 ## [3.1.0-dev.6](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.5...v3.1.0-dev.6) (2026-01-23)
 
 ### 🐛 Bug Fixes
