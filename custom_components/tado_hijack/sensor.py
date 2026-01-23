@@ -94,6 +94,7 @@ class TadoRateLimitSensor(TadoHomeEntity, SensorEntity):
         super().__init__(coordinator, description.translation_key)
         self.entity_description = description
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_{description.key}"
+        self._set_entity_id("sensor", description.key)
 
     @property
     def native_value(self) -> int:
@@ -114,6 +115,7 @@ class TadoApiStatusSensor(TadoHomeEntity, SensorEntity):
         """Initialize Tado API status sensor."""
         super().__init__(coordinator, "api_status")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_api_status"
+        self._set_entity_id("sensor", "api_status")
 
     @property
     def native_value(self) -> str:

@@ -114,6 +114,7 @@ class TadoBridgeConnectionSensor(TadoHomeEntity, BinarySensorEntity):
         self._attr_unique_id = (
             f"{coordinator.config_entry.entry_id}_bridge_{bridge.serial_no}"
         )
+        self._set_entity_id("binary_sensor", "cloud_connection", prefix="tado_ib")
 
     @property
     def is_on(self) -> bool:

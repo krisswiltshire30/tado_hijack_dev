@@ -50,6 +50,7 @@ class TadoRefreshMetadataButton(TadoHomeEntity, ButtonEntity):
         """Initialize refresh metadata button."""
         super().__init__(coordinator, "refresh_metadata")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_refresh_metadata"
+        self._set_entity_id("button", "refresh_metadata")
 
     async def async_press(self) -> None:
         """Handle button press."""
@@ -63,6 +64,7 @@ class TadoRefreshOffsetsButton(TadoHomeEntity, ButtonEntity):
         """Initialize refresh offsets button."""
         super().__init__(coordinator, "refresh_offsets")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_refresh_offsets"
+        self._set_entity_id("button", "refresh_offsets")
 
     async def async_press(self) -> None:
         """Handle button press."""
@@ -76,6 +78,7 @@ class TadoRefreshAwayConfigButton(TadoHomeEntity, ButtonEntity):
         """Initialize refresh away button."""
         super().__init__(coordinator, "refresh_away")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_refresh_away"
+        self._set_entity_id("button", "refresh_away")
 
     async def async_press(self) -> None:
         """Handle button press."""
@@ -89,6 +92,7 @@ class TadoManualPollButton(TadoHomeEntity, ButtonEntity):
         """Initialize manual poll button."""
         super().__init__(coordinator, "full_manual_poll")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_full_manual_poll"
+        self._set_entity_id("button", "full_manual_poll")
 
     async def async_press(self) -> None:
         """Handle button press (debounced by ApiManager)."""
@@ -103,6 +107,7 @@ class TadoResumeAllSchedulesButton(TadoHomeEntity, ButtonEntity):
         """Initialize resume all schedules button."""
         super().__init__(coordinator, "resume_all_schedules")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_resume_all"
+        self._set_entity_id("button", "resume_all_schedules")
 
     async def async_press(self) -> None:
         """Handle button press (debounced by ApiManager)."""
@@ -117,6 +122,7 @@ class TadoTurnOffAllButton(TadoHomeEntity, ButtonEntity):
         """Initialize turn off all button."""
         super().__init__(coordinator, "turn_off_all_zones")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_turn_off_all"
+        self._set_entity_id("button", "turn_off_all_zones")
 
     async def async_press(self) -> None:
         """Handle button press (debounced by ApiManager)."""
@@ -131,6 +137,7 @@ class TadoBoostAllButton(TadoHomeEntity, ButtonEntity):
         """Initialize boost all button."""
         super().__init__(coordinator, "boost_all_zones")
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_boost_all"
+        self._set_entity_id("button", "boost_all_zones")
 
     async def async_press(self) -> None:
         """Handle button press (debounced by ApiManager)."""

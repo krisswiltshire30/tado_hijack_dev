@@ -155,22 +155,23 @@ Unlike other integrations that group everything by "Zone", Tado Hijack maps enti
 
 ## 📱 Entities & Controls
 
-### 🏠 Home Device ("Tado Home")
-Global controls for the entire home. *Will be linked to your Internet Bridge device.*
+### 🏠 Home Device (Internet Bridge)
+Global controls for the entire home. *Linked to your Internet Bridge device.* Entity IDs use `{home}` as placeholder for your home name.
 
 | Entity | Type | Description |
 | :--- | :--- | :--- |
-| `switch.away_mode` | Switch | Toggle Home/Away presence lock. |
-| `button.turn_off_all_zones` | Button | **Bulk:** Turns off heating in ALL zones. |
-| `button.boost_all_zones` | Button | **Bulk:** Boosts all zones to 25°C. |
-| `button.resume_all_schedules` | Button | **Bulk:** Returns all zones to Smart Schedule. |
-| `button.refresh_metadata` | Button | Updates zone and device metadata (2 calls). |
-| `button.refresh_offsets` | Button | Fetches all hardware offsets (N calls). |
-| `button.refresh_away` | Button | Fetches all zone away temps (M calls). |
-| `button.full_manual_poll` | Button | **Expensive:** Refreshes everything at once. |
-| `sensor.api_calls_remaining` | Sensor | Your precious daily API gold. |
-| `sensor.api_status` | Sensor | API status (`connected`, `throttled`, `rate_limited`). |
-| `binary_sensor.bridge_connection` | Binary Sensor | Bridge connectivity to Tado cloud. |
+| `switch.tado_{home}_away_mode` | Switch | Toggle Home/Away presence lock. |
+| `button.tado_{home}_turn_off_all_zones` | Button | **Bulk:** Turns off heating in ALL zones. |
+| `button.tado_{home}_boost_all_zones` | Button | **Bulk:** Boosts all zones to 25°C. |
+| `button.tado_{home}_resume_all_schedules` | Button | **Bulk:** Returns all zones to Smart Schedule. |
+| `button.tado_{home}_refresh_metadata` | Button | Updates zone and device metadata (2 calls). |
+| `button.tado_{home}_refresh_offsets` | Button | Fetches all hardware offsets (N calls). |
+| `button.tado_{home}_refresh_away` | Button | Fetches all zone away temps (M calls). |
+| `button.tado_{home}_full_manual_poll` | Button | **Expensive:** Refreshes everything at once. |
+| `sensor.tado_{home}_api_limit` | Sensor | Daily API call limit. |
+| `sensor.tado_{home}_api_remaining` | Sensor | Your precious daily API gold. |
+| `sensor.tado_{home}_api_status` | Sensor | API status (`connected`, `throttled`, `rate_limited`). |
+| `binary_sensor.tado_ib_{home}_cloud_connection` | Binary Sensor | Bridge connectivity to Tado cloud. |
 
 ### 🌡️ Zone Devices (Rooms / Hot Water / AC)
 Cloud-only features that HomeKit does not support.

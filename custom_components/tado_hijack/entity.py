@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, cast
 
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 
 from .const import DEVICE_TYPE_MAP, DOMAIN
 from .helpers.device_linker import get_homekit_identifiers
@@ -56,6 +57,18 @@ class TadoEntity(CoordinatorEntity):
 class TadoHomeEntity(TadoEntity):
     """Entity belonging to the Tado Home device."""
 
+    def _set_entity_id(self, domain: str, key: str, prefix: str = "tado") -> None:
+        """Set entity_id before registration. Call in subclass __init__."""
+        title = (
+            self.coordinator.config_entry.title
+            if self.coordinator.config_entry
+            else "home"
+        )
+        if title.startswith("Tado "):
+            title = title[5:]
+        home_slug = slugify(title)
+        self.entity_id = f"{domain}.{prefix}_{home_slug}_{key}"
+
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info for the home."""
@@ -76,9 +89,9 @@ class TadoHomeEntity(TadoEntity):
             ):
                 identifiers.update(hk_ids)
 
-            # Use first bridge for metadata
-            if name == self.coordinator.config_entry.title:
-                name = f"tado Internet Bridge connection {bridge.serial_no}"
+            # Use first bridge for metadata (HomeKit-style name)
+            if sw_version is None:
+                name = f"tado Internet Bridge {bridge.serial_no}"
                 model = bridge.device_type
                 sw_version = bridge.current_fw_version
 

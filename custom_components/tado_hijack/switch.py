@@ -96,6 +96,7 @@ class TadoAwaySwitch(TadoHomeEntity, TadoOptimisticSwitch):
         super().__init__(coordinator, "away_mode")
 
         self._attr_unique_id = f"{coordinator.config_entry.entry_id}_away_mode"
+        self._set_entity_id("switch", "away_mode")
 
     def _get_optimistic_value(self) -> bool | None:
         if (opt := self.tado_coordinator.optimistic.get_presence()) is not None:

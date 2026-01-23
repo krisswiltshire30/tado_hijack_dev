@@ -81,6 +81,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     proxy_url = entry.data.get(CONF_API_PROXY_URL)
     debug_logging = entry.data.get(CONF_DEBUG_LOGGING, False)
 
+    if debug_logging:
+        _LOGGER.setLevel(logging.DEBUG)
+        logging.getLogger("tadoasync").setLevel(logging.DEBUG)
+        _LOGGER.debug("Debug logging enabled for Tado Hijack")
+
     if proxy_url:
         _LOGGER.info("Using Tado API Proxy at %s", proxy_url)
 
