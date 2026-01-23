@@ -1,3 +1,12 @@
+## [3.1.0-dev.8](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.7...v3.1.0-dev.8) (2026-01-23)
+
+### 🐛 Bug Fixes
+
+* fix(core): improve hot water and AC optimistic UI
+
+- fix(coordinator): add optimistic manual mode update when changing AC settings.
+- fix(number): set optimistic_value=True for hot water temperature changes to ensure schedule switch updates.
+
 ## [3.1.0-dev.7](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.6...v3.1.0-dev.7) (2026-01-23)
 
 ### 🐛 Bug Fixes
