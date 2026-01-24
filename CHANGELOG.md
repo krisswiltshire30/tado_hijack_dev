@@ -1,3 +1,15 @@
+## [3.1.0-dev.10](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.9...v3.1.0-dev.10) (2026-01-24)
+
+### ✨ New Features
+
+* feat(climate): native hot water and enhanced overlay control
+
+- implement native hot water climate entity with AUTO/HEAT/OFF modes
+- enhance 'set_timer' service with HH:MM:SS format and new overlay modes
+- add 'Dynamic Presence-Aware Overlay' (until presence change) and 'Auto' (next block)
+- implement intelligent temperature capping (Heating 25°C, AC 30°C, HW 80°C)
+- introduce hybrid auto-quota strategy to ensure 'Always-On' polling
+
 ## [3.1.0-dev.9](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.8...v3.1.0-dev.9) (2026-01-23)
 
 ### 🐛 Bug Fixes
