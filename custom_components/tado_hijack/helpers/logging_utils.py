@@ -47,14 +47,21 @@ class TadoRedactionFilter(logging.Filter):
         if isinstance(record.msg, str):
             record.msg = redact(record.msg)
 
-        if record.args:
-            new_args: list[Any] = []
-            for arg in record.args:
-                if isinstance(arg, int | float | bool | type(None)):
-                    new_args.append(arg)
-                else:
+        if record.args and isinstance(record.args, tuple):
+            # Only allocate new list if redaction is needed
+            new_args: list[Any] | None = None
+            for i, arg in enumerate(record.args):
+                if not isinstance(arg, int | float | bool | type(None)):
+                    # First redaction needed - copy args and continue
+                    if new_args is None:
+                        new_args = list(record.args[:i])
                     new_args.append(redact(arg))
-            record.args = tuple(new_args)
+                elif new_args is not None:
+                    # Already copying, keep primitives as-is
+                    new_args.append(arg)
+
+            if new_args is not None:
+                record.args = tuple(new_args)
 
         return True
 

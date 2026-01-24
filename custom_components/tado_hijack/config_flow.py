@@ -25,18 +25,23 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_API_PROXY_URL,
+    CONF_AUTO_API_QUOTA_PERCENT,
     CONF_DEBOUNCE_TIME,
+    CONF_DEBUG_LOGGING,
     CONF_DISABLE_POLLING_WHEN_THROTTLED,
     CONF_OFFSET_POLL_INTERVAL,
     CONF_REFRESH_TOKEN,
     CONF_SLOW_POLL_INTERVAL,
     CONF_THROTTLE_THRESHOLD,
+    DEFAULT_AUTO_API_QUOTA_PERCENT,
     DEFAULT_DEBOUNCE_TIME,
     DEFAULT_OFFSET_POLL_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLOW_POLL_INTERVAL,
     DEFAULT_THROTTLE_THRESHOLD,
     DOMAIN,
+    MAX_API_QUOTA,
     MIN_DEBOUNCE_TIME,
     MIN_OFFSET_POLL_INTERVAL,
     MIN_SCAN_INTERVAL,
@@ -53,7 +58,7 @@ _LOGGER = logging.getLogger(__name__)
 class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Tado Hijack."""
 
-    VERSION = 2
+    VERSION = 3
     login_task: asyncio.Task | None = None
     refresh_token: str | None = None
     tado: Tado | None = None
@@ -79,7 +84,9 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
         """Handle the initial step."""
         if self.tado is None:
             try:
-                self.tado = Tado(debug=True, session=async_get_clientsession(self.hass))
+                self.tado = Tado(
+                    debug=False, session=async_get_clientsession(self.hass)
+                )
                 await self.tado.async_init()
             except TadoError:
                 _LOGGER.exception("Error initiating Tado")
@@ -172,6 +179,11 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                     CONF_DEBOUNCE_TIME: user_input.get(
                         CONF_DEBOUNCE_TIME, DEFAULT_DEBOUNCE_TIME
                     ),
+                    CONF_AUTO_API_QUOTA_PERCENT: user_input.get(
+                        CONF_AUTO_API_QUOTA_PERCENT, DEFAULT_AUTO_API_QUOTA_PERCENT
+                    ),
+                    CONF_API_PROXY_URL: user_input.get(CONF_API_PROXY_URL),
+                    CONF_DEBUG_LOGGING: user_input.get(CONF_DEBUG_LOGGING, False),
                 },
             )
 
@@ -182,6 +194,14 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                     vol.Required(
                         CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
+                    vol.Optional(
+                        CONF_AUTO_API_QUOTA_PERCENT,
+                        default=DEFAULT_AUTO_API_QUOTA_PERCENT,
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                        )
+                    ),
                     vol.Required(
                         CONF_SLOW_POLL_INTERVAL, default=DEFAULT_SLOW_POLL_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SLOW_POLL_INTERVAL)),
@@ -191,18 +211,23 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                         vol.Coerce(int), vol.Range(min=MIN_OFFSET_POLL_INTERVAL)
                     ),
                     vol.Optional(
+                        CONF_DEBOUNCE_TIME, default=DEFAULT_DEBOUNCE_TIME
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DEBOUNCE_TIME)),
+                    vol.Optional(
                         CONF_THROTTLE_THRESHOLD, default=DEFAULT_THROTTLE_THRESHOLD
                     ): NumberSelector(
                         NumberSelectorConfig(
-                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                            min=0,
+                            max=MAX_API_QUOTA,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
                         )
                     ),
                     vol.Optional(
                         CONF_DISABLE_POLLING_WHEN_THROTTLED, default=False
                     ): bool,
-                    vol.Optional(
-                        CONF_DEBOUNCE_TIME, default=DEFAULT_DEBOUNCE_TIME
-                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DEBOUNCE_TIME)),
+                    vol.Optional(CONF_API_PROXY_URL): vol.Any(None, str),
+                    vol.Optional(CONF_DEBUG_LOGGING, default=False): bool,
                 }
             ),
         )
@@ -258,6 +283,16 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                         ),
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
                     vol.Optional(
+                        CONF_AUTO_API_QUOTA_PERCENT,
+                        default=self.config_entry.data.get(
+                            CONF_AUTO_API_QUOTA_PERCENT, DEFAULT_AUTO_API_QUOTA_PERCENT
+                        ),
+                    ): NumberSelector(
+                        NumberSelectorConfig(
+                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                        )
+                    ),
+                    vol.Optional(
                         CONF_SLOW_POLL_INTERVAL,
                         default=self.config_entry.data.get(
                             CONF_SLOW_POLL_INTERVAL, DEFAULT_SLOW_POLL_INTERVAL
@@ -272,13 +307,22 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                         vol.Coerce(int), vol.Range(min=MIN_OFFSET_POLL_INTERVAL)
                     ),
                     vol.Optional(
+                        CONF_DEBOUNCE_TIME,
+                        default=self.config_entry.data.get(
+                            CONF_DEBOUNCE_TIME, DEFAULT_DEBOUNCE_TIME
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DEBOUNCE_TIME)),
+                    vol.Optional(
                         CONF_THROTTLE_THRESHOLD,
                         default=self.config_entry.data.get(
                             CONF_THROTTLE_THRESHOLD, DEFAULT_THROTTLE_THRESHOLD
                         ),
                     ): NumberSelector(
                         NumberSelectorConfig(
-                            min=0, max=100, step=1, mode=NumberSelectorMode.BOX
+                            min=0,
+                            max=MAX_API_QUOTA,
+                            step=1,
+                            mode=NumberSelectorMode.BOX,
                         )
                     ),
                     vol.Optional(
@@ -288,11 +332,13 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                         ),
                     ): bool,
                     vol.Optional(
-                        CONF_DEBOUNCE_TIME,
-                        default=self.config_entry.data.get(
-                            CONF_DEBOUNCE_TIME, DEFAULT_DEBOUNCE_TIME
-                        ),
-                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_DEBOUNCE_TIME)),
+                        CONF_API_PROXY_URL,
+                        default=self.config_entry.data.get(CONF_API_PROXY_URL, ""),
+                    ): vol.Any(None, str),
+                    vol.Optional(
+                        CONF_DEBUG_LOGGING,
+                        default=self.config_entry.data.get(CONF_DEBUG_LOGGING, False),
+                    ): bool,
                 }
             ),
         )

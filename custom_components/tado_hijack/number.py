@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from homeassistant.components.number import (
     NumberEntity,
@@ -13,8 +13,18 @@ from homeassistant.components.number import (
 from homeassistant.const import UnitOfTemperature
 from homeassistant.helpers.restore_state import RestoreEntity
 
-from .const import CAPABILITY_INSIDE_TEMP
-from .entity import TadoDeviceEntity
+from .const import (
+    CAPABILITY_INSIDE_TEMP,
+    TEMP_MAX_AC,
+    TEMP_MAX_HOT_WATER_OVERRIDE,
+    TEMP_MIN_AC,
+    TEMP_MIN_HOT_WATER,
+)
+from .entity import (
+    TadoDeviceEntity,
+    TadoOptimisticMixin,
+    TadoZoneEntity,
+)
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -31,28 +41,72 @@ async def async_setup_entry(
     """Set up the Tado number platform."""
     coordinator: TadoDataUpdateCoordinator = entry.runtime_data
 
-    entities: list[TadoNumberEntity] = []
+    entities: list[NumberEntity] = []
 
     for zone in coordinator.zones_meta.values():
-        if zone.type != "HEATING":
-            continue
-        entities.extend(
-            TadoNumberEntity(
-                coordinator,
-                device.serial_no,
-                device.short_serial_no,
-                device.device_type,
-                zone.id,
-                device.current_fw_version,
+        # Temperature Offset per Device
+        if zone.type == "HEATING":
+            entities.extend(
+                TadoNumberEntity(
+                    coordinator,
+                    device.serial_no,
+                    device.short_serial_no,
+                    device.device_type,
+                    zone.id,
+                    device.current_fw_version,
+                )
+                for device in zone.devices
+                if CAPABILITY_INSIDE_TEMP in (device.characteristics.capabilities or [])
             )
-            for device in zone.devices
-            if CAPABILITY_INSIDE_TEMP in (device.characteristics.capabilities or [])
-        )
+
+        # Target Temperature per Zone (AC or Hot Water)
+        if zone.type in ("AIR_CONDITIONING", "HOT_WATER"):
+            # Don't fetch capabilities here to save API calls.
+            # We assume AC and Hot Water zones support target temperature control.
+            entities.append(
+                TadoTargetTempNumberEntity(coordinator, zone.id, zone.name, zone.type)
+            )
+
+        # Away Temperature per Zone (Heating only)
+        if zone.type == "HEATING":
+            entities.append(TadoAwayTempNumberEntity(coordinator, zone.id, zone.name))
+
     if entities:
         async_add_entities(entities)
 
 
-class TadoNumberEntity(TadoDeviceEntity, RestoreEntity, NumberEntity):
+class TadoOptimisticNumber(RestoreEntity, NumberEntity):
+    """Base class for optimistic numbers with restore support."""
+
+    _restored_value: float | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state on startup."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state not in (None, "unknown", "unavailable"):
+                with contextlib.suppress(ValueError, TypeError):
+                    self._restored_value = float(last_state.state)
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current value (optimistic > actual > restored)."""
+        if (opt := self._get_optimistic_value()) is not None:
+            return float(opt)
+
+        if (actual := self._get_actual_value()) is not None:
+            return float(actual)
+
+        return self._restored_value
+
+    def _get_optimistic_value(self) -> float | None:
+        raise NotImplementedError
+
+    def _get_actual_value(self) -> float | None:
+        raise NotImplementedError
+
+
+class TadoNumberEntity(TadoDeviceEntity, TadoOptimisticMixin, TadoOptimisticNumber):
     """Representation of a Tado temperature offset number."""
 
     _attr_has_entity_name = True
@@ -92,28 +146,137 @@ class TadoNumberEntity(TadoDeviceEntity, RestoreEntity, NumberEntity):
             mode=NumberMode.BOX,
         )
         self._attr_unique_id = f"{serial_no}_temperature_offset"
-        self._restored_value: float | None = None
 
-    async def async_added_to_hass(self) -> None:
-        """Restore previous state on startup."""
-        await super().async_added_to_hass()
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state not in (None, "unknown", "unavailable"):
-                with contextlib.suppress(ValueError, TypeError):
-                    self._restored_value = float(last_state.state)
+    def _get_optimistic_value(self) -> float | None:
+        val = self.coordinator.optimistic.get_offset(self._serial_no)
+        return float(val) if val is not None else None
 
-    @property
-    def native_value(self) -> float | None:
-        """Return the temperature offset value."""
-        if (
-            opt_offset := self.coordinator.optimistic.get_offset(self._serial_no)
-        ) is not None:
-            return float(opt_offset)
-
-        offsets: dict[str, Any] = self.coordinator.data.get("offsets", {})
-        offset = offsets.get(self._serial_no)
-        return float(offset.celsius) if offset is not None else self._restored_value
+    def _get_actual_value(self) -> float | None:
+        offset = self.coordinator.data.offsets.get(self._serial_no)
+        return float(offset.celsius) if offset is not None else None
 
     async def async_set_native_value(self, value: float) -> None:
         """Set a new temperature offset."""
         await self.coordinator.async_set_temperature_offset(self._serial_no, value)
+
+
+class TadoAwayTempNumberEntity(
+    TadoZoneEntity, TadoOptimisticMixin, TadoOptimisticNumber
+):
+    """Representation of a Tado Away Temperature number."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "away_temperature"
+    _attr_native_min_value = 5.0
+    _attr_native_max_value = 25.0
+    _attr_native_step = 0.1
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_mode = NumberMode.BOX
+
+    def __init__(
+        self,
+        coordinator: TadoDataUpdateCoordinator,
+        zone_id: int,
+        zone_name: str,
+    ) -> None:
+        """Initialize the number entity."""
+        super().__init__(coordinator, "away_temperature", zone_id, zone_name)
+        self.entity_description = NumberEntityDescription(
+            key="away_temperature",
+            translation_key="away_temperature",
+            native_min_value=5.0,
+            native_max_value=25.0,
+            native_step=0.1,
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+            mode=NumberMode.BOX,
+        )
+        self._attr_unique_id = f"zone_{zone_id}_away_temperature"
+
+    def _get_optimistic_value(self) -> float | None:
+        val = self.coordinator.optimistic.get_away_temp(self._zone_id)
+        return float(val) if val is not None else None
+
+    def _get_actual_value(self) -> float | None:
+        val = self.coordinator.data.away_config.get(self._zone_id)
+        return float(val) if val is not None else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set a new away temperature."""
+        await self.coordinator.async_set_away_temperature(self._zone_id, value)
+
+
+class TadoTargetTempNumberEntity(
+    TadoZoneEntity, TadoOptimisticMixin, TadoOptimisticNumber
+):
+    """Representation of a Tado Target Temperature number (AC/HW)."""
+
+    _attr_has_entity_name = True
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_mode = NumberMode.BOX
+
+    def __init__(
+        self,
+        coordinator: TadoDataUpdateCoordinator,
+        zone_id: int,
+        zone_name: str,
+        zone_type: str,
+    ) -> None:
+        """Initialize the target temperature entity."""
+        key = "target_temperature"
+        super().__init__(coordinator, key, zone_id, zone_name)
+        self._zone_type = zone_type
+
+        self._attr_native_min_value = (
+            TEMP_MIN_HOT_WATER if zone_type == "HOT_WATER" else TEMP_MIN_AC
+        )
+        self._attr_native_max_value = (
+            TEMP_MAX_HOT_WATER_OVERRIDE if zone_type == "HOT_WATER" else TEMP_MAX_AC
+        )
+
+        capabilities = coordinator.data.capabilities.get(zone_id)
+        if capabilities and capabilities.temperatures:
+            self._attr_native_min_value = float(capabilities.temperatures.celsius.min)
+            self._attr_native_max_value = float(capabilities.temperatures.celsius.max)
+            self._attr_native_step = float(capabilities.temperatures.celsius.step)
+
+        self._attr_unique_id = f"zone_{zone_id}_target_temp"
+
+    async def async_added_to_hass(self) -> None:
+        """Fetch capabilities on startup if not cached."""
+        await super().async_added_to_hass()
+        if capabilities := await self.coordinator.async_get_capabilities(self._zone_id):
+            if capabilities.temperatures:
+                self._attr_native_min_value = float(
+                    capabilities.temperatures.celsius.min
+                )
+                self._attr_native_max_value = float(
+                    capabilities.temperatures.celsius.max
+                )
+                self._attr_native_step = float(capabilities.temperatures.celsius.step)
+                self.async_write_ha_state()
+
+    def _get_optimistic_value(self) -> float | None:
+        return None
+
+    def _get_actual_value(self) -> float | None:
+        state = self.coordinator.data.zone_states.get(str(self._zone_id))
+        if state and state.setting and state.setting.temperature:
+            return float(state.setting.temperature.celsius)
+        return None
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set a new target temperature."""
+        if self._zone_type == "HOT_WATER":
+            # Use optimistic_value=True (Manual Overlay active) -> Schedule Switch shows OFF
+            await self.coordinator.async_set_zone_overlay(
+                self._zone_id,
+                power="ON",
+                temperature=value,
+                overlay_type="HOT_WATER",
+                optimistic_value=True,
+            )
+        else:
+            await self.coordinator.async_set_ac_setting(
+                self._zone_id, "temperature", str(value)
+            )

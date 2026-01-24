@@ -11,7 +11,12 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from tadoasync import TadoAuthenticationError
 
-from .const import CONF_REFRESH_TOKEN, DEFAULT_SCAN_INTERVAL
+from .const import (
+    CONF_API_PROXY_URL,
+    CONF_DEBUG_LOGGING,
+    CONF_REFRESH_TOKEN,
+    DEFAULT_SCAN_INTERVAL,
+)
 from .coordinator import TadoDataUpdateCoordinator
 from .helpers.client import TadoHijackClient
 from .helpers.logging_utils import TadoRedactionFilter
@@ -38,7 +43,31 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.NUMBER,
+    Platform.SELECT,
+    Platform.CLIMATE,
 ]
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool:
+    """Migrate old entry."""
+    _LOGGER.debug("Migrating from version %s", entry.version)
+
+    if entry.version == 1:
+        entry.version = 2
+
+    if entry.version == 2:
+        # Migrate scan_interval from 1800 to 3600 if it was set to legacy default
+        new_data = {**entry.data}
+        if new_data.get(CONF_SCAN_INTERVAL) == 1800:
+            _LOGGER.info(
+                "Migrating scan_interval from legacy default (1800s) to new default (3600s)"
+            )
+            new_data[CONF_SCAN_INTERVAL] = 3600
+
+        hass.config_entries.async_update_entry(entry, data=new_data, version=3)
+
+    _LOGGER.info("Migration to version %s successful", entry.version)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool:
@@ -50,11 +79,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
     _LOGGER.debug("Setting up Tado connection")
 
     scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    proxy_url = entry.data.get(CONF_API_PROXY_URL)
+    debug_logging = entry.data.get(CONF_DEBUG_LOGGING, False)
+
+    if debug_logging:
+        _LOGGER.setLevel(logging.DEBUG)
+        logging.getLogger("tadoasync").setLevel(logging.DEBUG)
+        _LOGGER.debug("Debug logging enabled for Tado Hijack")
+
+    if proxy_url:
+        _LOGGER.info("Using Tado API Proxy at %s", proxy_url)
 
     client = TadoHijackClient(
         refresh_token=entry.data[CONF_REFRESH_TOKEN],
         session=async_get_clientsession(hass),
-        debug=True,
+        debug=debug_logging,
+        proxy_url=proxy_url,
     )
 
     try:
@@ -64,8 +104,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
         raise ConfigEntryAuthFailed from e
     except Exception as e:
         _LOGGER.error("Failed to initialize Tado API: %s", e)
-        if "Bad Request" in str(e) or "400" in str(e):
-            _LOGGER.warning("Token likely invalid (400 Bad Request), triggering reauth")
+        # Check for HTTP 400/401 status codes or authentication-related errors
+        error_str = str(e).lower()
+        if (
+            "bad request" in error_str
+            or "400" in error_str
+            or "401" in error_str
+            or "unauthorized" in error_str
+            or ("invalid" in error_str and "token" in error_str)
+        ):
+            _LOGGER.warning(
+                "Token likely invalid (HTTP 400/401 or auth error), triggering reauth"
+            )
             raise ConfigEntryAuthFailed from e
         return False
 
@@ -83,6 +133,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool
 
 async def async_unload_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bool:
     """Unload a config entry."""
+    entry.runtime_data.shutdown()
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         await async_unload_services(hass)

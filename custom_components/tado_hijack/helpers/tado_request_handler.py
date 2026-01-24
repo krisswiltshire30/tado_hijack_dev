@@ -39,18 +39,53 @@ class TadoRequestHandler:
         endpoint: str = API_URL,
         data: dict[str, object] | None = None,
         method: HttpMethod = HttpMethod.GET,
+        proxy_url: str | None = None,
     ) -> str:
-        """Execute a robust request mimicking browser behavior."""
-        await instance._refresh_auth()  # noqa: SLF001
+        """Execute a robust request mimicking browser behavior.
 
-        url = self._build_url(uri, endpoint)
-        headers = self._build_headers(instance._access_token, method)  # noqa: SLF001
+        NOTE: This method accesses private tadoasync APIs (_refresh_auth, _access_token,
+        _request_timeout, _ensure_session) as they're not exposed publicly but necessary
+        for custom request handling. If tadoasync changes these internals, errors will
+        be logged and handled gracefully.
+        """
+        # Only refresh auth if NOT using a proxy (proxy handles auth)
+        if not proxy_url:
+            if hasattr(instance, "_refresh_auth"):
+                await instance._refresh_auth()  # noqa: SLF001
+            else:
+                _LOGGER.warning(
+                    "_refresh_auth not found in Tado instance (library may have changed)"
+                )
 
-        _LOGGER.debug("Tado Request: %s %s", method.value, url)
+        url = self._build_url(uri, endpoint, proxy_url)
+
+        # Get access token (private API with fallback)
+        access_token = getattr(instance, "_access_token", None)
+        if access_token is None:
+            _LOGGER.error(
+                "_access_token not found in Tado instance (library may have changed)"
+            )
+            raise TadoConnectionError("Cannot access Tado authentication token")
+
+        headers = self._build_headers(access_token, method)
+
+        _LOGGER.debug("Tado Request: %s %s (Proxy: %s)", method.value, url, proxy_url)
+
+        # Get timeout (private API with fallback)
+        request_timeout = getattr(instance, "_request_timeout", 10)
 
         try:
-            async with asyncio.timeout(instance._request_timeout):  # noqa: SLF001
-                session = instance._ensure_session()  # noqa: SLF001
+            async with asyncio.timeout(request_timeout):
+                # Get session (private API with fallback)
+                if hasattr(instance, "_ensure_session"):
+                    session = instance._ensure_session()  # noqa: SLF001
+                elif hasattr(instance, "_session") and instance._session is not None:
+                    session = instance._session  # noqa: SLF001
+                else:
+                    _LOGGER.error(
+                        "Cannot access session from Tado instance (library may have changed)"
+                    )
+                    raise TadoConnectionError("Cannot access HTTP session")
 
                 request_kwargs: dict[str, Any] = {
                     "method": method.value,
@@ -64,6 +99,13 @@ class TadoRequestHandler:
                     if rl := parse_ratelimit_headers(dict(response.headers)):
                         self.rate_limit_data["limit"] = rl.limit
                         self.rate_limit_data["remaining"] = rl.remaining
+                        _LOGGER.debug(
+                            "Tado Response: %d %s. Quota: %d/%d remaining.",
+                            response.status,
+                            url.path,
+                            rl.remaining,
+                            rl.limit,
+                        )
 
                     response.raise_for_status()
                     return cast(str, await response.text())
@@ -71,12 +113,26 @@ class TadoRequestHandler:
         except TimeoutError as err:
             raise TadoConnectionError("Timeout connecting to Tado") from err
         except ClientResponseError as err:
-            await instance.check_request_status(err)
+            # Only check request status if NOT using proxy, or if proxy passes through Tado errors 1:1
+            # But we can't refresh auth via proxy, so we just raise.
+            if not proxy_url:
+                await instance.check_request_status(err)
             raise
 
-    def _build_url(self, uri: str | None, endpoint: str) -> URL:
+    def _build_url(
+        self, uri: str | None, endpoint: str, proxy_url: str | None = None
+    ) -> URL:
         """Construct URL handling query parameters manually to avoid encoding issues."""
-        if endpoint == EIQ_HOST_URL:
+        if proxy_url:
+            # Map endpoint to correct path on proxy
+            parsed_proxy = URL(proxy_url)
+
+            if endpoint == EIQ_HOST_URL:
+                url = parsed_proxy.with_path(EIQ_API_PATH)
+            else:
+                url = parsed_proxy.with_path(TADO_API_PATH)
+
+        elif endpoint == EIQ_HOST_URL:
             url = URL.build(scheme="https", host=EIQ_HOST_URL, path=EIQ_API_PATH)
         else:
             url = URL.build(scheme="https", host=TADO_HOST_URL, path=TADO_API_PATH)

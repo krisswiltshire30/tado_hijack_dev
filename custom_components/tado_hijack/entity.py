@@ -6,12 +6,32 @@ from typing import TYPE_CHECKING, cast
 
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import slugify
 
 from .const import DEVICE_TYPE_MAP, DOMAIN
 from .helpers.device_linker import get_homekit_identifiers
 
 if TYPE_CHECKING:
+    from typing import Any
     from .coordinator import TadoDataUpdateCoordinator
+
+
+class TadoOptimisticMixin:
+    """Mixin for entities checking optimistic state before actual state."""
+
+    def _get_optimistic_value(self) -> Any | None:
+        """Return optimistic value if set."""
+        raise NotImplementedError
+
+    def _get_actual_value(self) -> Any:
+        """Return actual value from coordinator data."""
+        raise NotImplementedError
+
+    def _resolve_state(self) -> Any:
+        """Resolve state: Optimistic > Actual."""
+        if (opt := self._get_optimistic_value()) is not None:
+            return opt
+        return self._get_actual_value()
 
 
 class TadoEntity(CoordinatorEntity):
@@ -37,6 +57,18 @@ class TadoEntity(CoordinatorEntity):
 class TadoHomeEntity(TadoEntity):
     """Entity belonging to the Tado Home device."""
 
+    def _set_entity_id(self, domain: str, key: str, prefix: str = "tado") -> None:
+        """Set entity_id before registration. Call in subclass __init__."""
+        title = (
+            self.coordinator.config_entry.title
+            if self.coordinator.config_entry
+            else "home"
+        )
+        if title.startswith("Tado "):
+            title = title[5:]
+        home_slug = slugify(title)
+        self.entity_id = f"{domain}.{prefix}_{home_slug}_{key}"
+
     @property
     def device_info(self) -> DeviceInfo:
         """Return device info for the home."""
@@ -57,8 +89,8 @@ class TadoHomeEntity(TadoEntity):
             ):
                 identifiers.update(hk_ids)
 
-            # Use first bridge for metadata
-            if name == self.coordinator.config_entry.title:
+            # Use first bridge for metadata (HomeKit-style name)
+            if sw_version is None:
                 name = f"tado Internet Bridge {bridge.serial_no}"
                 model = bridge.device_type
                 sw_version = bridge.current_fw_version
@@ -123,7 +155,6 @@ class TadoDeviceEntity(TadoEntity):
         self._zone_id = zone_id
         self._fw_version = fw_version
 
-        # Try to find existing HomeKit device to link to
         self._linked_identifiers = get_homekit_identifiers(coordinator.hass, serial_no)
 
     @property
