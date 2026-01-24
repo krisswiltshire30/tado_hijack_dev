@@ -1,3 +1,19 @@
+## [3.1.0-dev.11](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.10...v3.1.0-dev.11) (2026-01-24)
+
+### ✨ New Features
+
+* feat(services): intelligent overlay control and system-wide optimizations
+
+- implement smart overlay detection (duration forces timer mode)
+- add 'set_timer_all_zones' for global room control
+- implement native hot water climate entity
+- add 'presence' and 'next_block' overlay termination modes
+- remove redundant 'time_period' (HH:MM:SS) for better precision
+- implement intelligent temperature capping (Heating 25°C, AC 30°C, HW 80°C)
+- optimize UI with required fields for clean toggle rendering
+- refactor services using DRY principles
+- enhance config flow with 1% quota step precision
+
 ## [3.1.0-dev.10](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.9...v3.1.0-dev.10) (2026-01-24)
 
 ### ✨ New Features
