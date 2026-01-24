@@ -24,7 +24,6 @@ from .const import (
     SERVICE_TURN_OFF_ALL_ZONES,
     ZONE_TYPE_AIR_CONDITIONING,
     ZONE_TYPE_HEATING,
-    ZONE_TYPE_HOT_WATER,
 )
 
 if TYPE_CHECKING:
@@ -151,39 +150,19 @@ async def _execute_set_timer(
     zone_ids: list[int],
     params: dict[str, Any],
 ) -> None:
-    """Execute set_timer logic with temperature capping and proper rounding for hot water."""
+    """Execute set_timer logic via coordinator HVAC dispatcher (DRY)."""
     power = params["power"]
     temperature = params["temperature"]
     duration = params["duration"]
     overlay = params["overlay"]
 
-    if temperature is not None:
-        for zone_id in zone_ids:
-            zone = coordinator.zones_meta.get(zone_id)
-            ztype = (
-                getattr(zone, "type", ZONE_TYPE_HEATING) if zone else ZONE_TYPE_HEATING
-            )
+    hvac_mode = "off" if power == "OFF" else "heat"
 
-            # Apply proper rounding for hot water
-            temp_value: float
-            if ztype == ZONE_TYPE_HOT_WATER:
-                temp_value = float(_round_hotwater_temp(float(temperature)))
-            else:
-                temp_value = float(temperature)
-
-            capped_temp = coordinator.get_capped_temperature(zone_id, temp_value)
-            await coordinator.async_set_multiple_zone_overlays(
-                zone_ids=[zone_id],
-                power=power,
-                temperature=capped_temp,
-                duration=duration,
-                overlay_mode=overlay,
-            )
-    else:
-        await coordinator.async_set_multiple_zone_overlays(
-            zone_ids=zone_ids,
-            power=power,
-            temperature=None,
+    for zone_id in zone_ids:
+        await coordinator.async_set_zone_hvac_mode(
+            zone_id=zone_id,
+            hvac_mode=hvac_mode,
+            temperature=temperature,
             duration=duration,
             overlay_mode=overlay,
         )

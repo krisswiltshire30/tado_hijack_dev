@@ -157,16 +157,36 @@ class TadoApiManager:
         await self._execute_offset_actions(merged["offsets"])
 
         # 5. Execute Away Temp Actions
-        await self._execute_away_actions(merged["away_temps"])
+        await self._execute_zone_property_actions(
+            merged["away_temps"],
+            "away temp",
+            self.coordinator.client.set_away_configuration,
+            self.coordinator.optimistic.clear_away_temp,
+        )
 
         # 6. Execute Dazzle Actions
-        await self._execute_dazzle_actions(merged["dazzle_modes"])
+        await self._execute_zone_property_actions(
+            merged["dazzle_modes"],
+            "dazzle",
+            self.coordinator.client.set_dazzle_mode,
+            self.coordinator.optimistic.clear_dazzle,
+        )
 
         # 7. Execute Early Start Actions
-        await self._execute_early_start_actions(merged["early_starts"])
+        await self._execute_zone_property_actions(
+            merged["early_starts"],
+            "early start",
+            self.coordinator.client.set_early_start,
+            self.coordinator.optimistic.clear_early_start,
+        )
 
         # 8. Execute Open Window Actions
-        await self._execute_open_window_actions(merged["open_windows"])
+        await self._execute_zone_property_actions(
+            merged["open_windows"],
+            "open window",
+            self.coordinator.client.set_open_window_detection,
+            self.coordinator.optimistic.clear_open_window,
+        )
 
         # 9. Execute Identify Actions
         await self._execute_identify_actions(merged["identifies"])
@@ -244,42 +264,6 @@ class TadoApiManager:
                 _LOGGER.error("Failed to %s for zone %d: %s", action_name, zone_id, e)
                 rollback_fn(zone_id)
                 self.coordinator.async_update_listeners()
-
-    async def _execute_away_actions(self, actions: dict[int, float]) -> None:
-        """Execute away temperature actions sequentially."""
-        await self._execute_zone_property_actions(
-            actions=actions,
-            action_name="set away temperature",
-            api_call=self.coordinator.client.set_away_configuration,
-            rollback_fn=self.coordinator.optimistic.clear_away_temp,
-        )
-
-    async def _execute_dazzle_actions(self, actions: dict[int, bool]) -> None:
-        """Execute dazzle mode actions sequentially."""
-        await self._execute_zone_property_actions(
-            actions=actions,
-            action_name="set dazzle mode",
-            api_call=self.coordinator.client.set_dazzle_mode,
-            rollback_fn=self.coordinator.optimistic.clear_dazzle,
-        )
-
-    async def _execute_early_start_actions(self, actions: dict[int, bool]) -> None:
-        """Execute early start actions sequentially."""
-        await self._execute_zone_property_actions(
-            actions=actions,
-            action_name="set early start",
-            api_call=self.coordinator.client.set_early_start,
-            rollback_fn=self.coordinator.optimistic.clear_early_start,
-        )
-
-    async def _execute_open_window_actions(self, actions: dict[int, bool]) -> None:
-        """Execute open window detection actions sequentially."""
-        await self._execute_zone_property_actions(
-            actions=actions,
-            action_name="set open window detection",
-            api_call=self.coordinator.client.set_open_window_detection,
-            rollback_fn=self.coordinator.optimistic.clear_open_window,
-        )
 
     async def _execute_identify_actions(self, actions: set[str]) -> None:
         """Execute identify actions sequentially."""

@@ -134,12 +134,15 @@ class TadoClimateEntity(TadoZoneEntity, TadoOptimisticMixin, ClimateEntity):
     @property
     def target_temperature(self) -> float | None:
         """Return target temperature."""
+        if self.hvac_mode == HVACMode.OFF:
+            return None
+
         state = self._current_state
         if state and state.setting and state.setting.temperature:
             if temp := getattr(state.setting.temperature, "celsius", None):
                 return float(temp)
 
-        return self._default_temp
+        return self._default_temp if self.hvac_mode == HVACMode.AUTO else None
 
     def _get_optimistic_value(self) -> dict[str, Any] | None:
         """Return optimistic state if set."""
@@ -163,37 +166,23 @@ class TadoClimateEntity(TadoZoneEntity, TadoOptimisticMixin, ClimateEntity):
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         """Set operation mode."""
-        if hvac_mode == HVACMode.AUTO:
-            await self.tado_coordinator.async_set_zone_auto(self._zone_id)
-            return
-
+        # Handle turning OFF (Store last target temp for restoration)
         if hvac_mode == HVACMode.OFF:
             if current := self.target_temperature:
                 if current > self._min_temp_limit:
                     self._last_target_temp = current
 
-            await self.tado_coordinator.async_set_multiple_zone_overlays(
-                zone_ids=[self._zone_id],
-                power=POWER_OFF,
-                overlay_mode=OVERLAY_MANUAL,
+        # Use restored temp if turning ON, else None
+        use_temp: float | None = None
+        if hvac_mode not in (HVACMode.OFF, HVACMode.AUTO):
+            use_temp = (
+                self._last_target_temp or self.target_temperature or self._default_temp
             )
-            return
 
-        # Handle turning ON (HEAT/COOL)
-        if self._last_target_temp:
-            use_temp = self._last_target_temp
-        else:
-            api_temp = self.target_temperature
-            if api_temp and api_temp > self._min_temp_limit:
-                use_temp = api_temp
-                self._last_target_temp = api_temp
-            else:
-                use_temp = self._default_temp
-
-        await self.tado_coordinator.async_set_multiple_zone_overlays(
-            zone_ids=[self._zone_id],
-            power=POWER_ON,
-            temperature=round(use_temp),
+        await self.tado_coordinator.async_set_zone_hvac_mode(
+            zone_id=self._zone_id,
+            hvac_mode=hvac_mode,
+            temperature=use_temp,
             overlay_mode=OVERLAY_MANUAL,
         )
 
@@ -221,7 +210,7 @@ class TadoWaterHeater(TadoClimateEntity):
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.AUTO]
     _attr_min_temp = TEMP_MIN_HOT_WATER
     _attr_max_temp = TEMP_MAX_HOT_WATER
     _attr_target_temperature_step = TEMP_STEP_HOT_WATER
@@ -243,7 +232,7 @@ class TadoWaterHeater(TadoClimateEntity):
         )
 
     def _get_active_hvac_mode(self) -> HVACMode:
-        return HVACMode.HEAT
+        return HVACMode.AUTO
 
     def _is_active(self, state: Any) -> bool:
         if (
