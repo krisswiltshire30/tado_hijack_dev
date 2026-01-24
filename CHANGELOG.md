@@ -1,3 +1,18 @@
+## [3.1.0-dev.12](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.11...v3.1.0-dev.12) (2026-01-24)
+
+### ✨ New Features
+
+* feat(core): major architectural upgrade for type safety, API efficiency, and AC Pro features
+
+- Refactored entire data model to use TadoData dataclasses, eliminating dict-based access and ensuring type safety across all platforms.
+- Implemented lazy loading for zone capabilities with asyncio locking to prevent race conditions and save API calls during startup.
+- Parallelized initial API calls using asyncio.gather to significantly speed up integration loading.
+- Consolidated climate logic into TadoClimateEntity base class, reducing redundancy and improving maintainability (DRY).
+- Enhanced TadoAirConditioning with dynamic fan speed and swing control based on actual device capabilities.
+- Integrated robust HVACAction reporting (Heating/Cooling/Idle) using real-time activity data points.
+- Optimized hardware synchronization logic to allow disabling periodic updates (Initial-only mode) for maximum API conservation.
+- Improved service call processing with consolidated parameter parsing and optimized batch preparation.
+
 ## [3.1.0-dev.11](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.10...v3.1.0-dev.11) (2026-01-24)
 
 ### ✨ New Features
