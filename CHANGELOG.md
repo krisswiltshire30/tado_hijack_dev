@@ -1,3 +1,39 @@
+## [4.0.0-dev.2](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.1...v4.0.0-dev.2) (2026-01-27)
+
+### ✨ New Features
+
+* feat(core): implement zero-waste architecture, entity migration and data integrity
+
+This major update finalizes the architectural shift to a fully optimized, zero-waste system
+and resolves critical entity conflicts via automatic migration.
+
+ZERO WASTE ARCHITECTURE:
+- Universal Rollback: Robust transaction system for all write actions (Presence, Overlays,
+  Child Lock, Offset).
+- Local State Patching: Updates UI immediately without triggering confirmatory API polls.
+- Safety Net: Automatic rollback to previous local state if API calls fail.
+- No-Poll Policy: Eliminated all 'refresh after action' logic for maximum quota efficiency.
+
+ENTITY MIGRATION & HOT WATER:
+- Entity Cleanup: Automatic migration to remove legacy '_hw_' switch entities that
+  conflicted with the new water_heater platform.
+- Unique ID Strategy: Changed water_heater ID schema to '_water_heater_' to prevent
+  collisions.
+- Type Safety: Fixed Mypy errors in entity and coordinator classes.
+
+REFACTORING:
+- CommandMerger: Simplified via dispatch map and integrated rollback context.
+- Meta-Cleanup: Removed non-essential comments.
+
+NEW FEATURES:
+- Added 'button.refresh_presence' for manual state checks without full polls.
+
+DOCUMENTATION:
+- Auto Quota: Updated technical description to reflect stateless predictive consumption model.
+- Diagnostics: Relocated detailed privacy info to Troubleshooting section for better support flow.
+- Privacy: Refined safety statement to 'should be safe' and added manual verification advice.
+- Zero Waste: Explicitly documented the new write strategy in the API Consumption section.
+
 ## [4.0.0-dev.1](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.15...v4.0.0-dev.1) (2026-01-27)
 
 ### ⚠ BREAKING CHANGES
