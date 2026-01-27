@@ -19,7 +19,7 @@
         "name": "Heating Power"
       },
       "hot_water_power": {
-        "name": "Hot Water Power"
+        "name": "Power"
       },
       "humidity": {
         "name": "Humidity"
@@ -37,6 +37,15 @@
       },
       "bridge_connection": {
         "name": "Bridge Cloud Connection"
+      },
+      "overlay": {
+        "name": "Overlay"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "connectivity": {
+        "name": "Connectivity"
       }
     },
     "switch": {
@@ -170,7 +179,8 @@
         "title": "Tado Hijack Configuration",
         "description": "Choose the data update intervals and throttle settings.",
         "data": {
-          "scan_interval": "Fast Polling Interval (Seconds)",
+          "scan_interval": "Zone State Polling Interval (Seconds)",
+          "presence_poll_interval": "Presence Polling Interval (Seconds)",
           "auto_api_quota_percent": "Auto API Quota (%)",
           "slow_poll_interval": "Hardware Sync Interval (Hours)",
           "offset_poll_interval": "Offset Update Interval (Hours)",
@@ -182,7 +192,8 @@
           "debug_logging": "Enable Debug Logging"
         },
         "data_description": {
-          "scan_interval": "How often to check Home/Away and HVAC state. Set to 0 to disable periodic polling (manual only). 1800s (30m) is recommended.",
+          "scan_interval": "How often to check room data (temp, humidity, heating power). 1800s (30m) is recommended.",
+          "presence_poll_interval": "How often to check Home/Away status. Set to a higher value (e.g. 43200s/12h) to save API quota if you use HA presence tracking.",
           "auto_api_quota_percent": "Use X% of FREE daily quota for status polling (0 = disabled). FREE = Limit - Throttle Reserve - Metadata Updates - Offset Updates. Hybrid strategy: Uses MAX(Daily Budget - Used, Remaining * X%) → System ALWAYS continues polling even when over daily budget.",
           "slow_poll_interval": "How often to sync battery levels, firmware, capabilities and device list. Set to 0 to disable periodic updates (initial only). 24h is highly recommended.",
           "offset_poll_interval": "How often to fetch temperature offsets. Costs 1 API call PER VALVE. Set to 0 to disable (manual poll only).",
@@ -207,7 +218,8 @@
       "init": {
         "title": "Tado Hijack Options",
         "data": {
-          "scan_interval": "Update Interval (Seconds)",
+          "scan_interval": "Zone Polling Interval (Seconds)",
+          "presence_poll_interval": "Presence Polling Interval (Seconds)",
           "auto_api_quota_percent": "Auto API Quota (%)",
           "slow_poll_interval": "Hardware Sync Interval (Hours)",
           "offset_poll_interval": "Offset Update Interval (Hours)",
@@ -219,7 +231,8 @@
           "debug_logging": "Enable Debug Logging"
         },
         "data_description": {
-          "scan_interval": "Interval for presence and heating state. Set to 0 to disable periodic polling.",
+          "scan_interval": "Interval for room data. 1800s is recommended.",
+          "presence_poll_interval": "Interval for presence state. 43200s is recommended to save quota.",
           "auto_api_quota_percent": "Use X% of FREE daily quota for status polling (0 = disabled). FREE = Limit - Throttle - Scheduled Updates. Hybrid strategy prevents self-throttling when quota is low. Interval auto-adjusts until 12:00 CET reset.",
           "slow_poll_interval": "Interval for battery levels, firmware and device metadata. Set to 0 for initial only. 24h is sufficient.",
           "offset_poll_interval": "Interval for temperature offsets. Costs 1 API call PER VALVE. 0 = disabled.",

@@ -90,15 +90,18 @@ def _patch_zone_state() -> None:
             # Rescue Hot Water Activity before it gets dropped by the strict dataclass
             # We map it to a field that we can later access in sensor.py
             if activity := d.get("activityDataPoints"):
-                if "hotWaterInUse" in activity:
+                if (
+                    "hotWaterInUse" in activity
+                    and isinstance(activity["hotWaterInUse"], dict)
+                    and "value" in activity["hotWaterInUse"]
+                ):
+                    hw_val = activity["hotWaterInUse"]["value"]
                     # Inject into a safe place for our hijacked parser
                     activity["heatingPower"] = {
                         "type": "HOT_WATER_POWER",
-                        "percentage": 100.0
-                        if activity["hotWaterInUse"] == "ON"
-                        else 0.0,
+                        "percentage": 100.0 if hw_val == "ON" else 0.0,
                         "timestamp": datetime.now().isoformat(),
-                        "value": activity["hotWaterInUse"],
+                        "value": hw_val,
                     }
             return d
 

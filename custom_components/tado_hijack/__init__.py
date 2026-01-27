@@ -14,7 +14,9 @@ from tadoasync import TadoAuthenticationError
 from .const import (
     CONF_API_PROXY_URL,
     CONF_DEBUG_LOGGING,
+    CONF_PRESENCE_POLL_INTERVAL,
     CONF_REFRESH_TOKEN,
+    DEFAULT_PRESENCE_POLL_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
 )
 from .coordinator import TadoDataUpdateCoordinator
@@ -45,6 +47,7 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SELECT,
     Platform.CLIMATE,
+    Platform.WATER_HEATER,
 ]
 
 
@@ -53,18 +56,26 @@ async def async_migrate_entry(hass: HomeAssistant, entry: TadoConfigEntry) -> bo
     _LOGGER.debug("Migrating from version %s", entry.version)
 
     if entry.version == 1:
+        # Migration to version 2 (Initial refactor)
         entry.version = 2
 
     if entry.version == 2:
-        # Migrate scan_interval from 1800 to 3600 if it was set to legacy default
+        # Migration to version 3 (Legacy scan_interval fix)
         new_data = {**entry.data}
         if new_data.get(CONF_SCAN_INTERVAL) == 1800:
-            _LOGGER.info(
-                "Migrating scan_interval from legacy default (1800s) to new default (3600s)"
-            )
+            _LOGGER.info("Migrating scan_interval to 3600s (v3)")
             new_data[CONF_SCAN_INTERVAL] = 3600
-
         hass.config_entries.async_update_entry(entry, data=new_data, version=3)
+
+    if entry.version == 3:
+        # Migration to version 4 (Introduction of Presence Polling)
+        new_data = {**entry.data}
+        if CONF_PRESENCE_POLL_INTERVAL not in new_data:
+            _LOGGER.info("Introducing presence_poll_interval (v4)")
+            new_data[CONF_PRESENCE_POLL_INTERVAL] = new_data.get(
+                CONF_SCAN_INTERVAL, DEFAULT_PRESENCE_POLL_INTERVAL
+            )
+        hass.config_entries.async_update_entry(entry, data=new_data, version=4)
 
     _LOGGER.info("Migration to version %s successful", entry.version)
     return True

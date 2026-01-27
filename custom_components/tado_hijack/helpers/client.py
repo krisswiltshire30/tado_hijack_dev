@@ -60,6 +60,23 @@ class TadoHijackClient(Tado):
             method=HttpMethod.POST,
         )
 
+    async def set_hot_water_zone_overlay(
+        self, zone_id: int, data: dict[str, Any]
+    ) -> None:
+        """Set overlay for a hot water zone."""
+        await self._request(
+            f"homes/{self._home_id}/zones/{zone_id}/overlay",
+            data=data,
+            method=HttpMethod.PUT,
+        )
+
+    async def reset_hot_water_zone_overlay(self, zone_id: int) -> None:
+        """Reset overlay for a hot water zone."""
+        await self._request(
+            f"homes/{self._home_id}/zones/{zone_id}/overlay",
+            method=HttpMethod.DELETE,
+        )
+
     async def set_temperature_offset(self, serial_no: str, offset: float) -> None:
         """Set the temperature offset for a device."""
         await self._request(

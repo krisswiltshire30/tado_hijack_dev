@@ -31,6 +31,7 @@ from .const import (
     CONF_DEBUG_LOGGING,
     CONF_DISABLE_POLLING_WHEN_THROTTLED,
     CONF_OFFSET_POLL_INTERVAL,
+    CONF_PRESENCE_POLL_INTERVAL,
     CONF_REFRESH_AFTER_RESUME,
     CONF_REFRESH_TOKEN,
     CONF_SLOW_POLL_INTERVAL,
@@ -38,6 +39,7 @@ from .const import (
     DEFAULT_AUTO_API_QUOTA_PERCENT,
     DEFAULT_DEBOUNCE_TIME,
     DEFAULT_OFFSET_POLL_INTERVAL,
+    DEFAULT_PRESENCE_POLL_INTERVAL,
     DEFAULT_REFRESH_AFTER_RESUME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_SLOW_POLL_INTERVAL,
@@ -60,7 +62,7 @@ _LOGGER = logging.getLogger(__name__)
 class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Tado Hijack."""
 
-    VERSION = 3
+    VERSION = 4
     login_task: asyncio.Task | None = None
     refresh_token: str | None = None
     tado: Tado | None = None
@@ -170,6 +172,9 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                 data={
                     CONF_REFRESH_TOKEN: self.refresh_token,
                     CONF_SCAN_INTERVAL: user_input[CONF_SCAN_INTERVAL],
+                    CONF_PRESENCE_POLL_INTERVAL: user_input.get(
+                        CONF_PRESENCE_POLL_INTERVAL, DEFAULT_PRESENCE_POLL_INTERVAL
+                    ),  # gitleaks:allow
                     CONF_SLOW_POLL_INTERVAL: user_input[CONF_SLOW_POLL_INTERVAL],
                     CONF_OFFSET_POLL_INTERVAL: user_input.get(
                         CONF_OFFSET_POLL_INTERVAL, DEFAULT_OFFSET_POLL_INTERVAL
@@ -209,6 +214,10 @@ class TadoHijackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: i
                             min=0, max=100, step=1, mode=NumberSelectorMode.BOX
                         )
                     ),
+                    vol.Required(
+                        CONF_PRESENCE_POLL_INTERVAL,
+                        default=DEFAULT_PRESENCE_POLL_INTERVAL,
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
                     vol.Required(
                         CONF_SLOW_POLL_INTERVAL, default=DEFAULT_SLOW_POLL_INTERVAL
                     ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SLOW_POLL_INTERVAL)),
@@ -273,9 +282,9 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Initialize the options flow."""
-        if user_input:
+        if user_input is not None:
             # Convert empty API proxy URL to None (allows deletion)
-            if CONF_API_PROXY_URL in user_input and not user_input[CONF_API_PROXY_URL]:
+            if not user_input.get(CONF_API_PROXY_URL):
                 user_input[CONF_API_PROXY_URL] = None
             # Update entry.data directly (not options) so coordinator sees changes
             self.hass.config_entries.async_update_entry(
@@ -305,6 +314,12 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                             min=0, max=100, step=1, mode=NumberSelectorMode.BOX
                         )
                     ),
+                    vol.Optional(
+                        CONF_PRESENCE_POLL_INTERVAL,
+                        default=self.config_entry.data.get(
+                            CONF_PRESENCE_POLL_INTERVAL, DEFAULT_PRESENCE_POLL_INTERVAL
+                        ),
+                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL)),
                     vol.Optional(
                         CONF_SLOW_POLL_INTERVAL,
                         default=self.config_entry.data.get(
@@ -346,8 +361,13 @@ class TadoHijackOptionsFlowHandler(config_entries.OptionsFlow):
                     ): bool,
                     vol.Optional(
                         CONF_API_PROXY_URL,
-                        default=self.config_entry.data.get(CONF_API_PROXY_URL) or "",
-                    ): vol.Any(None, str),
+                        description={
+                            "suggested_value": self.config_entry.data.get(
+                                CONF_API_PROXY_URL
+                            )
+                            or ""
+                        },
+                    ): str,
                     vol.Optional(
                         CONF_REFRESH_AFTER_RESUME,
                         default=self.config_entry.data.get(

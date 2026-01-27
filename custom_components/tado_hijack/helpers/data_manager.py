@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 from ..const import (
     CAPABILITY_INSIDE_TEMP,
+    DEFAULT_PRESENCE_POLL_INTERVAL,
     DOMAIN,
     SLOW_POLL_CYCLE_S,
     TEMP_OFFSET_ATTR,
@@ -44,12 +45,14 @@ class TadoDataManager:
         client: Tado,
         slow_poll_seconds: int,
         offset_poll_seconds: int = 0,
+        presence_poll_seconds: int = DEFAULT_PRESENCE_POLL_INTERVAL,
     ) -> None:
         """Initialize Tado data manager."""
         self.coordinator = coordinator
         self._tado = client
         self._slow_poll_seconds = slow_poll_seconds
         self._offset_poll_seconds = offset_poll_seconds
+        self._presence_poll_seconds = presence_poll_seconds
 
         # Caches
         self.zones_meta: dict[int, Any] = {}
@@ -61,226 +64,148 @@ class TadoDataManager:
         self._last_slow_poll: float = 0
         self._last_offset_poll: float = time.monotonic()
         self._last_away_poll: float = time.monotonic()
+        self._last_presence_poll: float = 0
+        self._last_zones_poll: float = 0
         self._offset_invalidated: bool = False
         self._away_invalidated: bool = False
+        self._presence_invalidated: bool = False
+        self._zones_invalidated: bool = False
 
     @property
     def client(self) -> TadoHijackClient:
-        """Return the client cast to TadoHijackClient for custom methods."""
+        """Return the client cast to TadoHijackClient."""
         return cast("TadoHijackClient", self._tado)
 
-    def _create_offset_task(self, serial: str) -> PollTask:
-        """Create a task for fetching temperature offset."""
-        return PollTask(1, lambda: self._tado.get_device_info(serial, TEMP_OFFSET_ATTR))
-
     def _build_poll_plan(self, current_time: float) -> list[PollTask]:
-        """Construct the execution plan for the current poll cycle.
-
-        Defines the sequence of API calls for both execution and cost prediction.
-        """
-        plan: list[PollTask] = [
-            PollTask(1, self._tado.get_home_state),
-            PollTask(1, self._tado.get_zone_states),
-        ]
-
-        # --- 2. Slow Track (Metadata) ---
-        if (
-            not self.zones_meta
-            or (current_time - self._last_slow_poll) > self._slow_poll_seconds
-        ):
-            plan.append(PollTask(1, self._tado.get_zones))
-            plan.append(PollTask(1, self._tado.get_devices))
-
-            # Capabilities: One call per AC/HotWater zone
-            plan.extend(
-                PollTask(1, lambda z=zone.id: self._tado.get_capabilities(z))
-                for zone in self.zones_meta.values()
-                if zone.type in ("AIR_CONDITIONING", "HOT_WATER")
-            )
-        # --- 3. Medium Track (Offsets) ---
-        if self._offset_invalidated or (
-            self._offset_poll_seconds > 0
-            and (current_time - self._last_offset_poll) > self._offset_poll_seconds
-        ):
-            # One call per active device with temp capability
-            devices_with_temp = [
-                dev
-                for dev in self.devices_meta.values()
-                if CAPABILITY_INSIDE_TEMP in (dev.characteristics.capabilities or [])
-            ]
-            for dev in devices_with_temp:
-                unique_id = f"{dev.serial_no}_temperature_offset"
-                if not self._is_entity_disabled("number", unique_id):
-                    plan.append(self._create_offset_task(dev.serial_no))
-
-        # --- 4. Away Config ---
-        if self._away_invalidated:
-            heating_zones = [
-                z
-                for z in self.zones_meta.values()
-                if getattr(z, "type", "") == "HEATING"
-            ]
-            plan.extend(
-                PollTask(1, lambda z=zone.id: self.client.get_away_configuration(z))
-                for zone in heating_zones
-            )
+        """Construct the execution plan for the current poll cycle."""
+        plan: list[PollTask] = []
+        self._add_fast_track_to_plan(plan, current_time)
+        self._add_presence_track_to_plan(plan, current_time)
+        self._add_slow_track_to_plan(plan, current_time)
+        self._add_medium_track_to_plan(plan, current_time)
+        self._add_away_track_to_plan(plan)
         return plan
 
-    def predict_next_poll_cost(self) -> int:
-        """Predict the exact API cost of the NEXT poll based on the plan.
+    def _add_fast_track_to_plan(self, plan: list[PollTask], now: float) -> None:
+        interval = (
+            self.coordinator.update_interval.total_seconds()
+            if self.coordinator.update_interval
+            else 0
+        )
+        if (
+            not self.zones_meta
+            or self._zones_invalidated
+            or (interval > 0 and (now - self._last_zones_poll) >= (interval - 1))
+        ):
+            plan.append(PollTask(1, self._tado.get_zone_states))
 
-        Uses _build_poll_plan() to ensure 100% parity with execution logic.
-        """
-        current_time = time.monotonic()
-        plan = self._build_poll_plan(current_time)
-        return sum(task.cost for task in plan)
-
-    def estimate_daily_reserved_cost(self) -> tuple[int, dict[str, int]]:
-        """Estimate API calls reserved for SCHEDULED updates over 24 hours.
-
-        Only counts slow poll and offset poll - NOT fast poll!
-        Fast poll is the TARGET of auto quota, not a reservation.
-
-        Returns:
-            Tuple of (total_reserved, breakdown_dict) for logging/debugging.
-
-        """
-        seconds_per_day = SLOW_POLL_CYCLE_S
-        breakdown: dict[str, int] = {}
-
-        # --- Measure Slow Poll Cost (battery/metadata) ---
-        # This runs independently on its own schedule
-        slow_poll_cost = self._measure_slow_poll_cost()
-        if self._slow_poll_seconds > 0:
-            slow_polls_per_day = seconds_per_day / self._slow_poll_seconds
-            breakdown["slow_poll_total"] = int(slow_poll_cost * slow_polls_per_day)
-            breakdown["slow_poll_cost"] = slow_poll_cost
-        else:
-            breakdown["slow_poll_total"] = 0
-            breakdown["slow_poll_cost"] = 0
-
-        # --- Measure Offset Poll Cost ---
-        # This also runs on its own schedule
-        offset_poll_cost = self._measure_offset_poll_cost()
-        if self._offset_poll_seconds > 0:
-            offset_polls_per_day = seconds_per_day / self._offset_poll_seconds
-            breakdown["offset_poll_total"] = int(
-                offset_poll_cost * offset_polls_per_day
+    def _add_presence_track_to_plan(self, plan: list[PollTask], now: float) -> None:
+        if (
+            not self.zones_meta
+            or self._presence_invalidated
+            or (
+                self._presence_poll_seconds > 0
+                and (now - self._last_presence_poll)
+                >= (self._presence_poll_seconds - 1)
             )
-            breakdown["offset_poll_cost"] = offset_poll_cost
-        else:
-            breakdown["offset_poll_total"] = 0
-            breakdown["offset_poll_cost"] = 0
+        ):
+            plan.append(PollTask(1, self._tado.get_home_state))
 
-        # Fast poll cost is NOT reserved - it's what we're budgeting FOR
-        breakdown["fast_poll_cost"] = self._measure_fast_poll_cost()
+    def _add_slow_track_to_plan(self, plan: list[PollTask], now: float) -> None:
+        if (
+            not self.zones_meta
+            or (now - self._last_slow_poll) > self._slow_poll_seconds
+        ):
+            plan.extend(
+                [PollTask(1, self._tado.get_zones), PollTask(1, self._tado.get_devices)]
+            )
+            plan.extend(
+                PollTask(1, lambda z=z.id: self._tado.get_capabilities(z))
+                for z in self.zones_meta.values()
+                if z.type in ("AIR_CONDITIONING", "HOT_WATER")
+            )
 
-        total_reserved = breakdown["slow_poll_total"] + breakdown["offset_poll_total"]
-        return total_reserved, breakdown
-
-    def _measure_fast_poll_cost(self) -> int:
-        """Measure cost of fast poll only (home_state + zone_states)."""
-        # Fast poll is always: get_home_state + get_zone_states
-        # We count PollTasks that are ALWAYS in the plan
-        plan: list[PollTask] = [
-            PollTask(1, self._tado.get_home_state),
-            PollTask(1, self._tado.get_zone_states),
-        ]
-        return sum(task.cost for task in plan)
-
-    def _measure_slow_poll_cost(self) -> int:
-        """Measure cost of slow poll track (metadata/battery)."""
-        plan: list[PollTask] = [
-            PollTask(1, self._tado.get_zones),
-            PollTask(1, self._tado.get_devices),
-        ]
-        # Capabilities: One call per AC/HotWater zone
-        plan.extend(
-            PollTask(1, lambda z=zone.id: self._tado.get_capabilities(z))
-            for zone in self.zones_meta.values()
-            if zone.type in ("AIR_CONDITIONING", "HOT_WATER")
-        )
-        return sum(task.cost for task in plan)
-
-    def _measure_offset_poll_cost(self) -> int:
-        """Measure cost of offset poll track (temperature offsets)."""
-        devices_with_temp = [
-            dev
-            for dev in self.devices_meta.values()
-            if CAPABILITY_INSIDE_TEMP in (dev.characteristics.capabilities or [])
-        ]
-        plan: list[PollTask] = []
-        for dev in devices_with_temp:
-            unique_id = f"{dev.serial_no}_temperature_offset"
-            if not self._is_entity_disabled("number", unique_id):
-                plan.append(self._create_offset_task(dev.serial_no))
-        return sum(task.cost for task in plan)
-
-    async def fetch_full_update(self) -> TadoData:
-        """Perform a data fetch by executing the poll plan.
-
-        Instead of executing the plan blindly (which is hard for data storage),
-        we use the logic that built the plan (timings) to trigger the blocks.
-        The plan exists to ensure 'predict_next_poll_cost' is accurate.
-        """
-        current_time = time.monotonic()
-
-        # Execute Logic based on Timings (PARITY WITH PLAN)
-        # We manually execute the blocks, but the logic matches _build_poll_plan exactly.
-
-        # 1. Fast Track (Always)
-        _LOGGER.debug("DataManager: Fetching fast-track states")
-
-        # 2. Slow Track (Metadata) - Check if we need initial load
-        is_initial_load = not self.zones_meta
-        is_slow_poll_due = (
-            self._slow_poll_seconds > 0
-            and (current_time - self._last_slow_poll) > self._slow_poll_seconds
-        )
-
-        # 1. Fast Track (Always) - Sequential to avoid parallel request issues
-        home_state = await self._tado.get_home_state()
-        zone_states = await self._tado.get_zone_states()
-
-        # 2. Slow Track (Metadata)
-        if is_initial_load or is_slow_poll_due:
-            _LOGGER.info("DataManager: Fetching slow-track metadata")
-            zones = await self._tado.get_zones()
-            devices = await self._tado.get_devices()
-            self.zones_meta = {zone.id: zone for zone in zones}
-            self.devices_meta = {dev.short_serial_no: dev for dev in devices}
-
-            # Capabilities for AC/HotWater zones
-            for zone in zones:
-                if zone.type in ("AIR_CONDITIONING", "HOT_WATER"):
-                    try:
-                        self.capabilities_cache[
-                            zone.id
-                        ] = await self._tado.get_capabilities(zone.id)
-                    except Exception as err:
-                        _LOGGER.warning(
-                            "Failed to fetch capabilities for zone %d: %s", zone.id, err
-                        )
-
-            self.coordinator.bridges = [
-                dev for dev in devices if dev.device_type.startswith("IB")
-            ]
-            self._last_slow_poll = current_time
-
-        # 3. Medium Track (Offsets)
+    def _add_medium_track_to_plan(self, plan: list[PollTask], now: float) -> None:
         if self._offset_invalidated or (
             self._offset_poll_seconds > 0
-            and (current_time - self._last_offset_poll) > self._offset_poll_seconds
+            and (now - self._last_offset_poll) > self._offset_poll_seconds
         ):
-            await self._fetch_offsets()
-            self._last_offset_poll = current_time
-            self._offset_invalidated = False
+            for dev in self.devices_meta.values():
+                if CAPABILITY_INSIDE_TEMP in (
+                    dev.characteristics.capabilities or []
+                ) and not self._is_entity_disabled(
+                    "number", f"{dev.serial_no}_temperature_offset"
+                ):
+                    plan.append(
+                        PollTask(
+                            1,
+                            lambda d=dev.serial_no: self._tado.get_device_info(
+                                d, TEMP_OFFSET_ATTR
+                            ),
+                        )
+                    )
 
-        # 4. Away Config
+    def _add_away_track_to_plan(self, plan: list[PollTask]) -> None:
         if self._away_invalidated:
-            await self._fetch_away_config()
-            self._last_away_poll = current_time
-            self._away_invalidated = False
+            plan.extend(
+                PollTask(1, lambda z=z.id: self.client.get_away_configuration(z))
+                for z in self.zones_meta.values()
+                if getattr(z, "type", "") == "HEATING"
+            )
+
+    def _measure_presence_poll_cost(self) -> int:
+        """Measure cost of home_state poll."""
+        return 1
+
+    def _measure_zones_poll_cost(self) -> int:
+        """Measure cost of zone_states poll."""
+        return 1
+
+    def estimate_daily_reserved_cost(self) -> tuple[int, dict[str, int]]:
+        """Estimate API calls reserved for scheduled updates."""
+        sec_day = SLOW_POLL_CYCLE_S
+        p_cost = 1
+        s_cost = 2 + sum(
+            z.type in ("AIR_CONDITIONING", "HOT_WATER")
+            for z in self.zones_meta.values()
+        )
+        o_cost = sum(
+            CAPABILITY_INSIDE_TEMP in (d.characteristics.capabilities or [])
+            and not self._is_entity_disabled(
+                "number", f"{d.serial_no}_temperature_offset"
+            )
+            for d in self.devices_meta.values()
+        )
+
+        breakdown = {
+            "presence_poll_total": int(p_cost * (sec_day / self._presence_poll_seconds))
+            if self._presence_poll_seconds > 0
+            else 0,
+            "slow_poll_total": int(s_cost * (sec_day / self._slow_poll_seconds))
+            if self._slow_poll_seconds > 0
+            else 0,
+            "offset_poll_total": int(o_cost * (sec_day / self._offset_poll_seconds))
+            if self._offset_poll_seconds > 0
+            else 0,
+            "zones_poll_cost": 1,
+        }
+        total = (
+            breakdown["presence_poll_total"]
+            + breakdown["slow_poll_total"]
+            + breakdown["offset_poll_total"]
+        )
+        return total, breakdown
+
+    async def fetch_full_update(self) -> TadoData:
+        """Perform a data fetch."""
+        now = time.monotonic()
+        is_init = not self.zones_meta
+
+        home_state = await self._fetch_presence(now, is_init)
+        zone_states = await self._fetch_zones(now, is_init)
+        await self._fetch_metadata(now, is_init)
+        await self._fetch_offsets_if_due(now)
+        await self._fetch_away_if_due()
 
         return TadoData(
             home_state=home_state,
@@ -292,129 +217,152 @@ class TadoDataManager:
             away_config=self.away_cache,
         )
 
+    async def _fetch_presence(self, now: float, is_init: bool) -> Any:
+        if (
+            is_init
+            or self._presence_invalidated
+            or (
+                self._presence_poll_seconds > 0
+                and (now - self._last_presence_poll)
+                >= (self._presence_poll_seconds - 1)
+            )
+        ):
+            state = await self._tado.get_home_state()
+            self._last_presence_poll, self._presence_invalidated = now, False
+            return state
+        return getattr(self.coordinator.data, "home_state", None)
+
+    async def _fetch_zones(self, now: float, is_init: bool) -> dict:
+        interval = (
+            self.coordinator.update_interval.total_seconds()
+            if self.coordinator.update_interval
+            else 0
+        )
+        if (
+            is_init
+            or self._zones_invalidated
+            or (interval > 0 and (now - self._last_zones_poll) >= (interval - 1))
+        ):
+            states = await self._tado.get_zone_states()
+            self._last_zones_poll, self._zones_invalidated = now, False
+            return states
+        return getattr(self.coordinator.data, "zone_states", {})
+
+    async def _fetch_metadata(self, now: float, is_init: bool) -> None:
+        if is_init or (
+            self._slow_poll_seconds > 0
+            and (now - self._last_slow_poll) > self._slow_poll_seconds
+        ):
+            zones = await self._tado.get_zones()
+            devices = await self._tado.get_devices()
+            self.zones_meta = {z.id: z for z in zones}
+            self.devices_meta = {d.short_serial_no: d for d in devices}
+            for z in zones:
+                if z.type in ("AIR_CONDITIONING", "HOT_WATER"):
+                    try:
+                        self.capabilities_cache[
+                            z.id
+                        ] = await self._tado.get_capabilities(z.id)
+                    except Exception as e:
+                        _LOGGER.warning("Capabilities fail for zone %d: %s", z.id, e)
+            self.coordinator.bridges = [
+                d for d in devices if d.device_type.startswith("IB")
+            ]
+            self._last_slow_poll = now
+
+    async def _fetch_offsets_if_due(self, now: float) -> None:
+        if self._offset_invalidated or (
+            self._offset_poll_seconds > 0
+            and (now - self._last_offset_poll) > self._offset_poll_seconds
+        ):
+            await self._fetch_offsets()
+            self._last_offset_poll, self._offset_invalidated = now, False
+
+    async def _fetch_away_if_due(self) -> None:
+        if self._away_invalidated:
+            await self._fetch_away_config()
+            self._last_away_poll, self._away_invalidated = time.monotonic(), False
+
     def invalidate_cache(self, refresh_type: str = "all") -> None:
-        """Force specific cache refresh on next poll."""
+        """Force specific cache refresh."""
         if refresh_type in {"all", "metadata"}:
             self.zones_meta = {}
         if refresh_type in {"all", "offsets"}:
             self._offset_invalidated = True
         if refresh_type in {"all", "away"}:
             self._away_invalidated = True
+        if refresh_type in {"all", "presence"}:
+            self._presence_invalidated = True
+        if refresh_type in {"all", "zone"}:
+            self._zones_invalidated = True
 
     def _is_entity_disabled(self, platform: str, unique_id: str) -> bool:
-        """Check if an entity is disabled in the registry."""
-        ent_reg = er.async_get(self.coordinator.hass)
-        if entity_id := ent_reg.async_get_entity_id(platform, DOMAIN, unique_id):
-            entry = ent_reg.async_get(entity_id)
-            if entry and entry.disabled:
-                return True
+        """Check if an entity is disabled."""
+        reg = er.async_get(self.coordinator.hass)
+        if eid := reg.async_get_entity_id(platform, DOMAIN, unique_id):
+            entry = reg.async_get(eid)
+            return bool(entry and entry.disabled)
         return False
 
     async def _fetch_offsets(self) -> None:
-        """Fetch temperature offsets for all devices with temp sensor capability."""
-        if not self.devices_meta:
-            _LOGGER.debug("DataManager: No devices cached, skipping offset fetch")
-            return
-
-        devices_with_temp = [
-            dev
-            for dev in self.devices_meta.values()
-            if CAPABILITY_INSIDE_TEMP in (dev.characteristics.capabilities or [])
+        """Fetch temperature offsets."""
+        active = [
+            d
+            for d in self.devices_meta.values()
+            if CAPABILITY_INSIDE_TEMP in (d.characteristics.capabilities or [])
+            and not self._is_entity_disabled(
+                "number", f"{d.serial_no}_temperature_offset"
+            )
         ]
-
-        active_devices = []
-        for dev in devices_with_temp:
-            unique_id = f"{dev.serial_no}_temperature_offset"
-            if self._is_entity_disabled("number", unique_id):
-                _LOGGER.debug(
-                    "Skipping offset fetch for disabled device %s", dev.short_serial_no
-                )
-                continue
-            active_devices.append(dev)
-
-        if not active_devices:
+        if not active:
             return
-
-        _LOGGER.info(
-            "DataManager: Fetching offsets for %d devices", len(active_devices)
-        )
-
-        for device in active_devices:
+        _LOGGER.info("DataManager: Fetching offsets for %d devices", len(active))
+        for d in active:
             try:
-                offset = await self.coordinator.client.get_device_info(
-                    device.serial_no, TEMP_OFFSET_ATTR
+                off = await self.coordinator.client.get_device_info(
+                    d.serial_no, TEMP_OFFSET_ATTR
                 )
-                if isinstance(offset, TemperatureOffset):
-                    self.offsets_cache[device.serial_no] = offset
-            except TadoConnectionError as err:
-                _LOGGER.warning(
-                    "DataManager: Failed to fetch offset for %s: %s",
-                    device.short_serial_no,
-                    err,
-                )
+                if isinstance(off, TemperatureOffset):
+                    self.offsets_cache[d.serial_no] = off
+            except TadoConnectionError as e:
+                _LOGGER.warning("Offset fail for %s: %s", d.short_serial_no, e)
 
     async def _fetch_away_config(self) -> None:
-        """Fetch away configuration for all heating zones."""
-        if not self.zones_meta:
-            _LOGGER.debug("DataManager: No zones cached, skipping away fetch")
-            return
-
-        heating_zones = [
-            z for z in self.zones_meta.values() if getattr(z, "type", "") == "HEATING"
+        """Fetch away configuration."""
+        active = [
+            z
+            for z in self.zones_meta.values()
+            if getattr(z, "type", "") == "HEATING"
+            and not self._is_entity_disabled("number", f"zone_{z.id}_away_temperature")
         ]
-
-        active_zones = []
-        for zone in heating_zones:
-            unique_id = f"zone_{zone.id}_away_temperature"
-            if self._is_entity_disabled("number", unique_id):
-                _LOGGER.debug(
-                    "Skipping away config fetch for disabled zone %s", zone.name
-                )
-                continue
-            active_zones.append(zone)
-
-        active_count = len(active_zones)
-        if active_count == 0:
+        if not active:
             return
-
-        _LOGGER.info("DataManager: Fetching away config for %d zones", active_count)
-
-        for zone in active_zones:
+        _LOGGER.info("DataManager: Fetching away config for %d zones", len(active))
+        for z in active:
             try:
-                config = await self.coordinator.client.get_away_configuration(zone.id)
-                if "minimumAwayTemperature" in config:
-                    temp = config["minimumAwayTemperature"].get("celsius")
-                    if temp is not None:
-                        self.away_cache[zone.id] = float(temp)
-            except Exception as err:
-                _LOGGER.warning(
-                    "DataManager: Failed to fetch away config for zone %d: %s",
-                    zone.id,
-                    err,
-                )
+                cfg = await self.coordinator.client.get_away_configuration(z.id)
+                if (
+                    "minimumAwayTemperature" in cfg
+                    and (t := cfg["minimumAwayTemperature"].get("celsius")) is not None
+                ):
+                    self.away_cache[z.id] = float(t)
+            except Exception as e:
+                _LOGGER.warning("Away config fail for zone %d: %s", z.id, e)
 
     async def async_get_capabilities(self, zone_id: int) -> Any:
-        """Get capabilities for a zone, fetching from API if not cached (thread-safe)."""
+        """Get capabilities (thread-safe)."""
         if zone_id not in self.capabilities_cache:
-            # Ensure only one fetch happens per zone at a time
             if zone_id not in self._capability_locks:
                 self._capability_locks[zone_id] = asyncio.Lock()
-
             async with self._capability_locks[zone_id]:
-                # Double-check cache after acquiring lock
                 if zone_id in self.capabilities_cache:
                     return self.capabilities_cache[zone_id]
-
                 _LOGGER.info("DataManager: Fetching capabilities for zone %d", zone_id)
                 try:
                     self.capabilities_cache[
                         zone_id
                     ] = await self._tado.get_capabilities(zone_id)
-                except Exception as err:
-                    _LOGGER.error(
-                        "DataManager: Failed to fetch capabilities for zone %d: %s",
-                        zone_id,
-                        err,
-                    )
+                except Exception as e:
+                    _LOGGER.error("Capabilities fail for zone %d: %s", zone_id, e)
                     return None
         return self.capabilities_cache.get(zone_id)

@@ -92,10 +92,23 @@ class TadoClimateEntity(TadoZoneEntity, TadoOptimisticMixin, ClimateEntity):
         if state is None:
             return HVACMode.OFF
 
-        overlay = self.tado_coordinator.optimistic.get_zone_overlay(self._zone_id)
-        if overlay is False:
+        # 1. Optimistic Overlay (Priority)
+        opt_overlay = self.tado_coordinator.optimistic.get_zone_overlay(self._zone_id)
+        if opt_overlay is False:
             return HVACMode.AUTO
 
+        # 2. Real API State Overlay Check
+        # If NO overlay is active (and no optimistic override), we are in Schedule/Auto mode
+        api_has_overlay = False
+        if hasattr(state, "overlay"):
+            api_has_overlay = state.overlay is not None
+        elif isinstance(state, dict):
+            api_has_overlay = state.get("overlay") is not None
+
+        if not api_has_overlay and opt_overlay is None:
+            return HVACMode.AUTO
+
+        # 3. Determine Manual Mode (Overlay active)
         power = (
             state.get("power")
             if isinstance(state, dict)
@@ -245,7 +258,7 @@ class TadoWaterHeater(TadoClimateEntity):
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
     )
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.AUTO]
+    _attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.AUTO]
     _attr_min_temp = TEMP_MIN_HOT_WATER
     _attr_max_temp = TEMP_MAX_HOT_WATER
     _attr_target_temperature_step = TEMP_STEP_HOT_WATER
@@ -266,8 +279,15 @@ class TadoWaterHeater(TadoClimateEntity):
             f"{coordinator.config_entry.entry_id}_climate_hw_{zone_id}"
         )
 
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set operation mode."""
+        if hvac_mode in self._attr_hvac_modes:
+            await super().async_set_hvac_mode(hvac_mode)
+        else:
+            _LOGGER.warning("Unsupported HVAC mode '%s' for hot water zone", hvac_mode)
+
     def _get_active_hvac_mode(self) -> HVACMode:
-        return HVACMode.AUTO
+        return HVACMode.HEAT
 
     def _is_active(self, state: Any) -> bool:
         if not hasattr(state, "activity_data_points") or not state.activity_data_points:

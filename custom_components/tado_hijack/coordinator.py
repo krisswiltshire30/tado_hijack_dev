@@ -38,12 +38,14 @@ from .const import (
     CONF_DEBOUNCE_TIME,
     CONF_DISABLE_POLLING_WHEN_THROTTLED,
     CONF_OFFSET_POLL_INTERVAL,
+    CONF_PRESENCE_POLL_INTERVAL,
     CONF_REFRESH_AFTER_RESUME,
     CONF_SLOW_POLL_INTERVAL,
     CONF_THROTTLE_THRESHOLD,
     DEFAULT_AUTO_API_QUOTA_PERCENT,
     DEFAULT_DEBOUNCE_TIME,
     DEFAULT_OFFSET_POLL_INTERVAL,
+    DEFAULT_PRESENCE_POLL_INTERVAL,
     DEFAULT_REFRESH_AFTER_RESUME,
     DEFAULT_SLOW_POLL_INTERVAL,
     DEFAULT_THROTTLE_THRESHOLD,
@@ -60,6 +62,7 @@ from .const import (
     TEMP_MAX_HEATING,
     TEMP_MAX_HOT_WATER,
     TERMINATION_MANUAL,
+    TERMINATION_NEXT_TIME_BLOCK,
     TERMINATION_TADO_MODE,
     TERMINATION_TIMER,
     ZONE_TYPE_AIR_CONDITIONING,
@@ -132,7 +135,12 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             entry.data.get(CONF_OFFSET_POLL_INTERVAL, DEFAULT_OFFSET_POLL_INTERVAL)
             * SECONDS_PER_HOUR
         )
-        self.data_manager = TadoDataManager(self, client, slow_poll_s, offset_poll_s)
+        presence_poll_s = entry.data.get(
+            CONF_PRESENCE_POLL_INTERVAL, DEFAULT_PRESENCE_POLL_INTERVAL
+        )
+        self.data_manager = TadoDataManager(
+            self, client, slow_poll_s, offset_poll_s, presence_poll_s
+        )
         self.api_manager = TadoApiManager(hass, self, self._debounce_time)
         self.optimistic = OptimisticManager()
 
@@ -141,7 +149,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         self.bridges: list[Device] = []
         self._climate_to_zone: dict[str, int] = {}
         self._unsub_listener: CALLBACK_TYPE | None = None
-        self._reset_poll_unsub: CALLBACK_TYPE | None = None
+        self._polling_calls_today = 0
+        self._last_quota_reset: datetime | None = None
+        self._reset_poll_unsub: asyncio.TimerHandle | None = None  # gitleaks:allow
         self._resume_refresh_timer: asyncio.TimerHandle | None = None
         self._force_next_update: bool = False
 
@@ -179,7 +189,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             is_auto_mode = hvac_mode == "auto"
 
             for eid in entity_ids:
-                if zone_id := self._climate_to_zone.get(eid):
+                if (zone_id := self._climate_to_zone.get(eid)) is not None:
                     if is_auto_mode:
                         # AUTO mode = Resume Schedule
                         _LOGGER.debug(
@@ -219,7 +229,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
     def get_zone_id_from_entity(self, entity_id: str) -> int | None:
         """Resolve a Tado zone ID from any entity ID (HomeKit or Hijack)."""
         # 1. Check HomeKit mapping
-        if zone_id := self._climate_to_zone.get(entity_id):
+        if (zone_id := self._climate_to_zone.get(entity_id)) is not None:
             return zone_id
 
         # 2. Check Hijack registry
@@ -272,7 +282,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                 return True
         return False
 
-    def _get_active_zones(
+    def get_active_zones(
         self,
         include_heating: bool = True,
         include_ac: bool = False,
@@ -419,58 +429,44 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             )
             return SECONDS_PER_HOUR
 
-        # Calculate FREE quota after all reservations
-        # 1. Throttle threshold (emergency reserve)
-        # 2. Scheduled updates (slow poll, offset poll) - measured, not hardcoded
-        throttle_threshold = self.rate_limit.throttle_threshold
-        reserved_daily, reserved_breakdown = (
+        # 1. Total reserved calls for the full 24h cycle (Planned Maintenance)
+        reserved_total_24h, reserved_breakdown = (
             self.data_manager.estimate_daily_reserved_cost()
         )
 
-        # FREE QUOTA = Limit - Throttle Reserve - Scheduled Updates
-        free_quota = max(0, limit - throttle_threshold - reserved_daily)
+        # 2. Time progress since last reset
+        seconds_per_day = 24 * 3600
+        seconds_since_reset = seconds_per_day - seconds_until_reset
+        progress_done = seconds_since_reset / seconds_per_day
+        progress_remaining = 1.0 - progress_done
 
-        # Target = X% of FREE quota (not total!)
-        target_api_calls = int(free_quota * self._auto_api_quota_percent / 100)
+        # 3. Calculate current user consumption (Non-polling calls)
+        # We estimate how many calls should have been used by polling so far
+        expected_polling_so_far = reserved_total_24h * progress_done
+        actual_used_total = max(0, limit - remaining)
+        user_calls_so_far = max(0, actual_used_total - expected_polling_so_far)
 
-        _LOGGER.debug(
-            "Quota breakdown: Limit=%d, Throttle=%d, Reserved=%d (slow=%d, offset=%d), Free=%d, Target=%d%%=%d",
-            limit,
-            throttle_threshold,
-            reserved_daily,
-            reserved_breakdown.get("slow_poll_total", 0),
-            reserved_breakdown.get("offset_poll_total", 0),
-            free_quota,
-            self._auto_api_quota_percent,
-            target_api_calls,
-        )
+        # 4. Apply Threshold Buffer
+        # User calls only impact the budget if they exceed the threshold
+        throttle_threshold = self.rate_limit.throttle_threshold
+        user_excess = max(0, user_calls_so_far - throttle_threshold)
 
-        # Total calls used so far today
-        used_total_calls = max(0, limit - remaining)
+        # 5. Calculate available polling budget for the whole day
+        # Polling gets what's left after maintenance and user excess
+        available_for_day = max(0, limit - reserved_total_24h - user_excess)
+        total_auto_quota_budget = available_for_day * self._auto_api_quota_percent / 100
 
-        # HYBRID STRATEGY: Use the more generous of two approaches
-        # Strategy A: Long-term daily budget planning
-        budget_from_target = max(0, target_api_calls - used_total_calls)
-
-        # Strategy B: Short-term remaining-based fallback
-        usable_remaining = max(0, remaining - throttle_threshold)
-        budget_from_remaining = int(
-            usable_remaining * self._auto_api_quota_percent / 100
-        )
-
-        # Use MAX to ensure system continues polling even when over daily budget
-        # This prevents self-throttling when low on quota (e.g., 100 remaining)
-        remaining_budget = max(budget_from_target, budget_from_remaining)
+        # 6. Target budget for the rest of the day (sustainable planning)
+        remaining_budget = max(0, total_auto_quota_budget * progress_remaining)
 
         _LOGGER.debug(
-            "Quota breakdown: Limit=%d, Throttle=%d, Target=%d, Used=%d, BudgetTarget=%d, BudgetRemaining=%d, FinalBudget=%d",
-            limit,
-            throttle_threshold,
-            target_api_calls,
-            used_total_calls,
-            budget_from_target,
-            budget_from_remaining,
-            remaining_budget,
+            "Quota: Used=%d, ExpectedPoll=%d, User=%d, Excess=%d, AvailDay=%d, BudgetRem=%d",
+            actual_used_total,
+            int(expected_polling_so_far),
+            int(user_calls_so_far),
+            int(user_excess),
+            int(available_for_day),
+            int(remaining_budget),
         )
 
         if remaining_budget <= 0:
@@ -478,22 +474,23 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             if self._base_scan_interval <= 0:
                 _LOGGER.info(
                     "Budget reached (%d/%d used). Stopping polling.",
-                    used_total_calls,
-                    target_api_calls,
+                    actual_used_total,
+                    int(total_auto_quota_budget),
                 )
                 return None
 
             new_interval = max(MIN_AUTO_QUOTA_INTERVAL_S, int(self._base_scan_interval))
             _LOGGER.info(
                 "Budget reached (%d/%d used). Falling back to base interval (%ds).",
-                used_total_calls,
-                target_api_calls,
+                actual_used_total,
+                int(total_auto_quota_budget),
                 new_interval,
             )
             return new_interval
 
-        # Calculate interval based on predicted cost of the upcoming poll
-        predicted_cost = self.data_manager.predict_next_poll_cost()
+        # Calculate interval based on stable cost of zone polls (Auto Quota target)
+        # We use measure_zones_poll_cost to ensure we budget specifically for the fast track
+        predicted_cost = self.data_manager._measure_zones_poll_cost()
 
         # How many polls of this predicted size can we afford?
         remaining_polls = remaining_budget / predicted_cost
@@ -510,8 +507,8 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         _LOGGER.info(
             "Quota: Interval=%ds (Budget: %d/%d used, Next Cost: %d, Rem: %d calls -> %d polls, Reset in %.1fh)",
             bounded_interval,
-            used_total_calls,
-            target_api_calls,
+            actual_used_total,
+            int(total_auto_quota_budget),
             predicted_cost,
             remaining_budget,
             int(remaining_polls),
@@ -551,7 +548,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
 
         # Cancel existing timer
         if self._reset_poll_unsub:
-            self._reset_poll_unsub()
+            self._reset_poll_unsub.cancel()
 
         # Schedule new timer (ensure delay is positive)
         self._reset_poll_unsub = self.hass.loop.call_later(
@@ -706,6 +703,59 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                         "power": "ON",
                         "temperature": {"celsius": temp},
                     },
+                    "termination": {"typeSkillBasedApp": "MANUAL"},
+                },
+            ),
+        )
+
+    async def async_set_hot_water_auto(self, zone_id: int):
+        """Set hot water zone to auto mode (resume schedule)."""
+        self.optimistic.set_zone(zone_id, False, operation_mode="auto")
+        self.async_update_listeners()
+        self.api_manager.queue_command(
+            f"zone_{zone_id}",
+            TadoCommand(CommandType.RESUME_SCHEDULE, zone_id=zone_id),
+        )
+
+    async def async_set_hot_water_off(self, zone_id: int):
+        """Set hot water zone to off (manual overlay)."""
+        self.optimistic.set_zone(zone_id, True, operation_mode="off")
+        self.async_update_listeners()
+        self.api_manager.queue_command(
+            f"zone_{zone_id}",
+            TadoCommand(
+                CommandType.SET_OVERLAY,
+                zone_id=zone_id,
+                data={
+                    "setting": {"type": "HOT_WATER", "power": "OFF"},
+                    "termination": {"typeSkillBasedApp": "MANUAL"},
+                },
+            ),
+        )
+
+    async def async_set_hot_water_heat(self, zone_id: int):
+        """Set hot water zone to heat mode (manual overlay).
+
+        Preserves current temperature if the zone supports temperature control.
+        """
+        self.optimistic.set_zone(zone_id, True, operation_mode="heat")
+        self.async_update_listeners()
+
+        # Build setting - only include temperature if currently set
+        setting: dict[str, Any] = {"type": "HOT_WATER", "power": "ON"}
+
+        # Preserve current temperature if available (for OpenTherm systems)
+        state = self.data.zone_states.get(str(zone_id))
+        if state and state.setting and state.setting.temperature:
+            setting["temperature"] = {"celsius": state.setting.temperature.celsius}
+
+        self.api_manager.queue_command(
+            f"zone_{zone_id}",
+            TadoCommand(
+                CommandType.SET_OVERLAY,
+                zone_id=zone_id,
+                data={
+                    "setting": setting,
                     "termination": {"typeSkillBasedApp": "MANUAL"},
                 },
             ),
@@ -959,7 +1009,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         # Priority: overlay_mode > duration > default (MANUAL)
         if overlay_mode == OVERLAY_NEXT_BLOCK:
             # Auto-return to schedule at next time block
-            termination: dict[str, Any] = {"type": "NEXT_TIME_BLOCK"}
+            termination: dict[str, Any] = {
+                "typeSkillBasedApp": TERMINATION_NEXT_TIME_BLOCK
+            }
         elif overlay_mode == OVERLAY_PRESENCE:
             # While in current Presence Mode (indefinite until presence change or manual change)
             termination = {"type": TERMINATION_TADO_MODE}
@@ -989,6 +1041,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         temperature: float | None = None,
         duration: int | None = None,
         overlay_mode: str | None = None,
+        overlay_type: str | None = None,
     ) -> None:
         """Set manual overlays for multiple zones in a single batched process.
 
@@ -998,6 +1051,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             temperature: Target temperature (optional)
             duration: Duration in minutes (optional)
             overlay_mode: "manual", "timer", or "auto" (next_time_block)
+            overlay_type: Zone type (HEATING/AIR_CONDITIONING/HOT_WATER)
 
         """
         if not zone_ids:
@@ -1024,6 +1078,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                 temperature=temperature,
                 duration=duration,
                 overlay_mode=overlay_mode,
+                overlay_type=overlay_type,
             )
             self.api_manager.queue_command(
                 f"zone_{zone_id}",
@@ -1039,7 +1094,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         _LOGGER.debug("Resume all schedules triggered")
 
         # Only resume HEATING zones, not HOT_WATER or AC
-        active_zones = self._get_active_zones(include_heating=True)
+        active_zones = self.get_active_zones(include_heating=True)
 
         if not active_zones:
             _LOGGER.warning("No active heating zones to resume")
@@ -1088,7 +1143,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             action_name: Human-readable action name for logging
 
         """
-        zone_ids = self._get_active_zones(include_heating=True)
+        zone_ids = self.get_active_zones(include_heating=True)
 
         if not zone_ids:
             _LOGGER.warning("No active heating zones to %s", action_name)

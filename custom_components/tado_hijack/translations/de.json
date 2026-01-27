@@ -19,7 +19,7 @@
         "name": "Heizleistung"
       },
       "hot_water_power": {
-        "name": "Warmwasser-Leistung"
+        "name": "Leistung"
       },
       "humidity": {
         "name": "Luftfeuchtigkeit"
@@ -37,6 +37,15 @@
       },
       "bridge_connection": {
         "name": "Bridge Cloud-Verbindung"
+      },
+      "overlay": {
+        "name": "Overlay"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "connectivity": {
+        "name": "Verbindung"
       }
     },
     "switch": {
@@ -170,7 +179,8 @@
         "title": "Tado Hijack Konfiguration",
         "description": "Wähle die Intervalle für die Datenaktualisierung und Drosselungseinstellungen.",
         "data": {
-          "scan_interval": "Intervall für Schnelles Polling (Sekunden)",
+          "scan_interval": "Intervall für Raumdaten-Polling (Sekunden)",
+          "presence_poll_interval": "Intervall für Anwesenheits-Polling (Sekunden)",
           "auto_api_quota_percent": "Auto API Quota (%)",
           "slow_poll_interval": "Hardware-Synchronisationsintervall (Stunden)",
           "offset_poll_interval": "Intervall für Offset-Update (Stunden)",
@@ -182,7 +192,8 @@
           "debug_logging": "Debug-Logging aktivieren"
         },
         "data_description": {
-          "scan_interval": "Wie oft Anwesenheit und Heizstatus geprüft werden. Auf 0 setzen um periodisches Polling zu deaktivieren (nur manuell). 1800s (30m) wird empfohlen.",
+          "scan_interval": "Wie oft Raumdaten (Temp, Feuchtigkeit, Heizleistung) geprüft werden. 1800s (30m) wird empfohlen.",
+          "presence_poll_interval": "Wie oft der Home/Away Status geprüft wird. Ein hoher Wert (z.B. 43200s/12h) spart API-Quota, falls HA-Anwesenheit genutzt wird.",
           "auto_api_quota_percent": "Nutze X% der FREIEN Tagesquota für Status-Polling (0 = deaktiviert). FREI = Limit - Throttle-Reserve - Hardware-Updates - Offset-Updates. Hybrid-Strategie: Nutzt MAX(Tagesbudget - Verbraucht, Verbleibend * X%) → System pollt IMMER weiter, auch wenn Tagesbudget überschritten.",
           "slow_poll_interval": "Wie oft Batterien, Firmware, Fähigkeiten und die Geräteliste geprüft werden. Auf 0 setzen um periodische Updates zu deaktivieren (nur initial). 24h wird dringend empfohlen.",
           "offset_poll_interval": "Wie oft Temperatur-Offsets abgerufen werden. Kostet 1 API-Aufruf PRO VENTIL. Auf 0 setzen um zu deaktivieren (nur manuell).",
@@ -207,7 +218,8 @@
       "init": {
         "title": "Tado Hijack Optionen",
         "data": {
-          "scan_interval": "Aktualisierungsintervall (Sekunden)",
+          "scan_interval": "Raumdaten-Polling-Intervall (Sekunden)",
+          "presence_poll_interval": "Anwesenheits-Polling-Intervall (Sekunden)",
           "auto_api_quota_percent": "Auto API Quota (%)",
           "slow_poll_interval": "Hardware-Synchronisationsintervall (Stunden)",
           "offset_poll_interval": "Intervall für Offset-Update (Stunden)",
@@ -219,7 +231,8 @@
           "debug_logging": "Debug-Logging aktivieren"
         },
         "data_description": {
-          "scan_interval": "Intervall für Anwesenheit und Heizstatus. Auf 0 setzen um periodisches Polling zu deaktivieren.",
+          "scan_interval": "Intervall für Raumdaten. 1800s wird empfohlen.",
+          "presence_poll_interval": "Intervall für Anwesenheitsstatus. 43200s wird empfohlen um Quota zu sparen.",
           "auto_api_quota_percent": "Nutze X% der FREIEN Tagesquota für Status-Polling (0 = deaktiviert). FREI = Limit - Throttle - Geplante Updates. Hybrid-Strategie verhindert Selbst-Drosselung bei wenig Quota. Intervall passt sich automatisch bis 12:00 MEZ Reset an.",
           "slow_poll_interval": "Intervall für Batterien, Firmware und Metadaten. Auf 0 setzen für nur initial beim Start. 24h ist meist völlig ausreichend.",
           "offset_poll_interval": "Intervall für Temperatur-Offsets. Kostet 1 API-Aufruf PRO VENTIL. 0 = deaktiviert.",

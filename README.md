@@ -162,7 +162,7 @@ While other integrations waste your precious API quota for every tiny interactio
 <br>
 
 > [!IMPORTANT]
-> **Universal Batching:** This applies to manual dashboard interactions AND automated service calls (like `set_timer`). 10 timers at once? **Still only 1 API call.**
+> **Universal Batching:** This applies to manual dashboard interactions AND automated service calls (like `set_mode`). 10 changes at once? **Still only 1 API call.**
 
 <br>
 
@@ -208,7 +208,7 @@ Almost no other integration does this: Tado Hijack automatically detects your ex
 
 We bring back the controls Tado "forgot" to give you:
 
-*   **🚿 Hot Water Climate Control:** Native climate entity with AUTO/HEAT/OFF modes. AUTO mode resumes Smart Schedule, HEAT activates manual override.
+*   **🚿 Professional Hot Water Platform:** Native `water_heater` entity with AUTO/HEAT/OFF modes. AUTO resumes Smart Schedule, HEAT activates manual override.
 *   **❄️ AC Pro Features:** Precise Fan Speed and Swing (Horizontal/Vertical) selection.
 *   **🔥 Valve Opening Insight:** View the percentage of how far your valves are open (updated during state polls).
 *   **🔋 Real Battery Status:** Don't guess; see the actual health of every valve.
@@ -270,7 +270,7 @@ Tado's API limits are restrictive. That's why Tado Hijack uses a **Zero-Waste Po
 Tado Hijack doesn't just guess. It uses a **Predictive Consumption Model** to distribute your API calls evenly throughout the day.
 
 *   **⚡ Real-Time Cost Measurement:** The system measures the *actual* cost of every polling cycle and uses a smoothed moving average to predict future consumption.
-*   **🕒 Dynamic Reset-Sync:** It calculates the exact seconds remaining until the next API reset (**12:01 CET**) and adjusts your polling interval on-the-fly.
+*   **🕒 Dynamic Reset-Sync:** It calculates the exact seconds remaining until the next API reset (**12:01 Berlin**) and adjusts your polling interval on-the-fly.
 *   **📉 Hybrid Budget Strategy:** The system uses **two strategies** and picks the more generous one:
     *   **Long-term:** Distribute your daily target evenly across the day
     *   **Short-term:** Always keep polling with X% of currently remaining quota
@@ -368,7 +368,12 @@ Unlike other integrations that group everything by "Zone", Tado Hijack maps enti
 <br>
 
 *   **Custom Client Layer:** I extend the underlying library via inheritance to handle API communication reliably and fix common deserialization errors.
-*   **Privacy by Design:** All logs are automatically redacted. Sensitive data (User Codes, Serial Numbers, Home IDs) is stripped before writing to disk.
+*   **Expert-Level Diagnostics:** Support requests are safe. Our built-in Diagnostic Report uses **Multi-Layer Anonymization**:
+    *   **🔑 Key Pseudonymization:** HA Entity-IDs in JSON keys are transformed into anonymized hashes (e.g. `sensor.entity_8a3f`) to protect your room names while maintaining machine-readability.
+    *   **🛡️ PII Masking:** All sensitive names (Zones, Homes, Titles) are replaced with `"Anonymized Name"`.
+    *   **🕵️‍♂️ Serial Number Protection:** Every hardware identifier (VA, RU, IB, etc.) is automatically masked via Regex everywhere in the document.
+    *   **📊 Pure Debug Power:** Despite maximum privacy, the report contains all technical insights needed for support (Quota math, Cache ages, Internal Mappings, API Queue status).
+*   **Privacy by Design:** All standard logs are automatically redacted. Sensitive data is stripped before writing to disk.
 
 <br>
 
@@ -401,7 +406,8 @@ Unlike other integrations that group everything by "Zone", Tado Hijack maps enti
 
 | Option | Default | Description |
 | :--- | :--- | :--- |
-| **Status Polling** | `60m` | Interval for heating state and presence. (2 API calls) |
+| **Status Polling** | `30m` | Interval for heating state and valve percentage. (1 API call) |
+| **Presence Polling** | `12h` | Interval for Home/Away state. High interval saves mass quota. (1 API call) |
 | **Auto API Quota** | `0%` (Off) | Target X% of FREE quota. Uses hybrid strategy: daily budget OR X% of remaining (whichever is higher). |
 | **Hardware Sync** | `24h` | Interval for battery, firmware and device metadata. Set to 0 for initial load only. |
 | **Offset Update** | `0` (Off) | Interval for temperature offsets. Costs 1 API call per valve. |
@@ -457,8 +463,9 @@ Cloud-only features that HomeKit does not support.
 | Entity | Type | Description |
 | :--- | :--- | :--- |
 | `switch.schedule` | Switch | **ON** = Smart Schedule, **OFF** = Manual. Simple way to resume schedule. |
-| `climate.hot_water` | Climate | **Hot Water:** Control modes: AUTO (schedule), HEAT (manual), OFF. Temperature 30-65°C (1°C steps). |
-| `switch.hot_water` | Switch | **Legacy:** Direct boiler power control (replaced by climate entity). |
+| `water_heater.hot_water` | WaterHeater | **Hot Water:** Control modes: AUTO (schedule), HEAT (manual), OFF. Temperature 30-65°C (1°C steps). |
+| `binary_sensor.hot_water_power` | Binary Sensor | Status if boiler is currently heating water. |
+| `binary_sensor.hot_water_overlay` | Binary Sensor | Status if a manual override is active. |
 | `switch.early_start` | Switch | **Cloud Only:** Toggle pre-heating before schedule. |
 | `switch.open_window` | Switch | **Cloud Only:** Toggle window detection. |
 | `number.target_temperature` | Number | **Cloud Only:** Set target temp for AC/HW. |
@@ -504,8 +511,9 @@ For advanced automation, use these services:
 | `tado_hijack.turn_off_all_zones` | Turn off all zones instantly. | **1 call** (bulk) |
 | `tado_hijack.boost_all_zones` | Boost every zone to 25°C. | **1 call** (bulk) |
 | `tado_hijack.resume_all_schedules` | Restore Smart Schedule across all zones. | **1 call** (bulk) |
-| `tado_hijack.set_timer` | Set power, temperature, and termination mode. Supports `duration` or `overlay`: `manual` / `next_block` / `presence`. | **1 per zone** |
-| `tado_hijack.set_timer_all_zones` | Same as `set_timer` but targets all HEATING and/or AC zones at once. Efficiently batches everything into a single API call. | **1 call** (bulk) |
+| `tado_hijack.set_mode` | Set power, temperature, and termination mode. Supports `manual`, `next_block`, or `presence`. | **1 call** (batched) |
+| `tado_hijack.set_mode_all_zones` | Targets all HEATING and/or AC zones at once. Efficiently batches everything into a single API call. | **1 call** (bulk) |
+| `tado_hijack.set_water_heater_mode` | Set operation mode and temperature for hot water. | **1 call** |
 | `tado_hijack.manual_poll` | Force immediate data refresh. Use `refresh_type` to control scope. | **2-N** (depends on type) |
 
 <br>
@@ -515,15 +523,16 @@ For advanced automation, use these services:
 
 <br>
 
-#### `set_timer` Examples (YAML)
+#### `set_mode` Examples (YAML)
 
 <br>
 
 **Hot Water Boost (30 Min):**
 ```yaml
-service: tado_hijack.set_timer
+service: tado_hijack.set_water_heater_mode
 data:
-  entity_id: switch.hot_water
+  entity_id: water_heater.hot_water
+  operation_mode: "heat"
   duration: 30
 ```
 
@@ -531,7 +540,7 @@ data:
 
 **Quick Bathroom Heat (15 Min at 24°C):**
 ```yaml
-service: tado_hijack.set_timer
+service: tado_hijack.set_mode
 data:
   entity_id: climate.bathroom
   duration: 15
@@ -542,7 +551,7 @@ data:
 
 **Manual Override (Indefinite):**
 ```yaml
-service: tado_hijack.set_timer
+service: tado_hijack.set_mode
 data:
   entity_id: climate.living_room
   overlay: "manual"  # Indefinite until manual change or schedule resume
@@ -553,7 +562,7 @@ data:
 
 **Until Presence Changes (Indefinite until Home/Away change):**
 ```yaml
-service: tado_hijack.set_timer
+service: tado_hijack.set_mode
 data:
   entity_id: climate.living_room
   overlay: "presence"  # Indefinite until manual change or presence change
@@ -564,7 +573,7 @@ data:
 
 **Auto-Return to Schedule (Next Time Block):**
 ```yaml
-service: tado_hijack.set_timer
+service: tado_hijack.set_mode
 data:
   entity_id: climate.kitchen
   overlay: "next_block"  # Returns to schedule at next time block

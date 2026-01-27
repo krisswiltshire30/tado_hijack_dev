@@ -21,17 +21,17 @@ turn_off_all_zones:
 boost_all_zones:
   description: "Boost all heating zones to 25°C."
 
-set_timer:
-  description: "Set a manual overlay with a timer duration or auto-return to schedule."
+set_mode:
+  description: "Set a manual mode (overlay) with optional timer for Heating and AC zones."
   fields:
     entity_id:
-      description: "Any Tado Hijack zone entity (e.g. switch.hot_water_power or climate.living_room)."
+      description: "Any Tado Hijack zone entity (e.g. climate.living_room or water_heater.hot_water)."
       required: true
       selector:
         entity:
           integration: tado_hijack
     duration:
-      description: "Duration in minutes after which the timer ends."
+      description: "Duration in minutes after which the manual mode ends."
       selector:
         number:
           min: 1
@@ -54,15 +54,15 @@ set_timer:
             - "ON"
             - "OFF"
     temperature:
-      description: "Target temperature (optional). TRV/Heating: 5-25°C (0.1 step), Hot Water: 30-65°C (rounded to integer)."
+      description: "Target temperature (optional, 5-30°C)."
       selector:
         number:
           min: 5
-          max: 65
+          max: 30
           step: 0.1
           unit_of_measurement: "°C"
 
-set_timer_all_zones:
+set_mode_all_zones:
   description: "Set a manual overlay for all heating and/or AC zones at once."
   fields:
     include_heating:
@@ -85,7 +85,7 @@ set_timer_all_zones:
           max: 1440
           unit_of_measurement: "min"
     overlay:
-      description: "Termination mode: 'manual', 'next_block' (next block), or 'presence'."
+      description: "Termination mode: 'manual', 'next_block', or 'presence'."
       selector:
         select:
           options:
@@ -101,10 +101,52 @@ set_timer_all_zones:
             - "ON"
             - "OFF"
     temperature:
-      description: "Target temperature (will be capped to 25°C for Heating and 30°C for AC)."
+      description: "Target temperature (will be automatically capped)."
       selector:
         number:
           min: 5
           max: 30
           step: 0.1
+          unit_of_measurement: "°C"
+
+set_water_heater_mode:
+  description: "Set a manual mode (overlay) with optional timer for Water Heater zones."
+  fields:
+    entity_id:
+      description: "Any Tado Hijack water heater entity (e.g. water_heater.hot_water)."
+      required: true
+      selector:
+        entity:
+          domain: water_heater
+          integration: tado_hijack
+    duration:
+      description: "Duration in minutes after which the manual mode ends."
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: "min"
+    overlay:
+      description: "Termination mode: 'manual' (indefinite), 'next_block' (return to schedule at next time block), or 'presence' (until presence change)."
+      selector:
+        select:
+          options:
+            - "manual"
+            - "next_block"
+            - "presence"
+    operation_mode:
+      description: "Operation mode: 'auto' (resume schedule), 'heat' (on), or 'off'."
+      selector:
+        select:
+          options:
+            - "auto"
+            - "heat"
+            - "off"
+    temperature:
+      description: "Target temperature (30-65°C)."
+      selector:
+        number:
+          min: 30
+          max: 65
+          step: 1
           unit_of_measurement: "°C"

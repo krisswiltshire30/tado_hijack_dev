@@ -10,6 +10,8 @@ TADO_USER_AGENT: Final = f"HomeAssistant/{TADO_VERSION_PATCH}"
 
 # Configuration Keys
 CONF_REFRESH_TOKEN: Final = "refresh_token"
+CONF_SCAN_INTERVAL: Final = "scan_interval"  # Zone polling
+CONF_PRESENCE_POLL_INTERVAL: Final = "presence_poll_interval"
 CONF_SLOW_POLL_INTERVAL: Final = "slow_poll_interval"
 CONF_OFFSET_POLL_INTERVAL: Final = "offset_poll_interval"
 CONF_THROTTLE_THRESHOLD: Final = "throttle_threshold"
@@ -21,7 +23,8 @@ CONF_AUTO_API_QUOTA_PERCENT: Final = "auto_api_quota_percent"
 CONF_REFRESH_AFTER_RESUME: Final = "refresh_after_resume"
 
 # Default Intervals
-DEFAULT_SCAN_INTERVAL: Final = 3600
+DEFAULT_SCAN_INTERVAL: Final = 1800  # 30 minutes (Zone States)
+DEFAULT_PRESENCE_POLL_INTERVAL: Final = 43200  # 12 hours (Home State)
 DEFAULT_SLOW_POLL_INTERVAL: Final = 24  # Hours
 DEFAULT_OFFSET_POLL_INTERVAL: Final = 0  # Hours (0 = disabled)
 DEFAULT_DEBOUNCE_TIME: Final = 5  # Seconds
@@ -33,8 +36,9 @@ DEFAULT_AUTO_API_QUOTA_PERCENT: Final = (
 )
 DEFAULT_REFRESH_AFTER_RESUME: Final = True  # Refresh state after resume schedule
 
-# Minimums (scan_interval 0 = no periodic poll, offset 0 = disabled)
+# Minimums (0 = no periodic poll / disabled)
 MIN_SCAN_INTERVAL: Final = 0
+MIN_PRESENCE_POLL_INTERVAL: Final = 0
 MIN_SLOW_POLL_INTERVAL: Final = 0  # 0 = disabled (initial only)
 MIN_OFFSET_POLL_INTERVAL: Final = 0  # 0 = disabled
 MIN_DEBOUNCE_TIME: Final = 1  # Second
@@ -90,9 +94,10 @@ OVERLAY_PRESENCE: Final = "presence"
 TERMINATION_MANUAL: Final = "MANUAL"
 TERMINATION_TIMER: Final = "TIMER"
 TERMINATION_TADO_MODE: Final = "TADO_MODE"
+TERMINATION_NEXT_TIME_BLOCK: Final = "NEXT_TIME_BLOCK"
 
 # Auto API Quota
-API_RESET_HOUR: Final = 12  # Hour when Tado resets API quota (CET/CEST)
+API_RESET_HOUR: Final = 11  # Hour when Tado resets API quota (12:01 Berlin)
 API_RESET_BUFFER_MINUTES: Final = 1  # Buffer after reset to ensure fresh data
 
 # Service Names
@@ -100,8 +105,10 @@ SERVICE_MANUAL_POLL = "manual_poll"
 SERVICE_RESUME_ALL_SCHEDULES = "resume_all_schedules"
 SERVICE_TURN_OFF_ALL_ZONES = "turn_off_all_zones"
 SERVICE_BOOST_ALL_ZONES = "boost_all_zones"
-SERVICE_SET_TIMER = "set_timer"
-SERVICE_SET_TIMER_ALL = "set_timer_all_zones"
+SERVICE_SET_MODE = "set_mode"
+SERVICE_SET_MODE_ALL = "set_mode_all_zones"
+SERVICE_SET_WATER_HEATER_MODE = "set_water_heater_mode"
+
 
 # Device Capabilities
 CAPABILITY_INSIDE_TEMP: Final = "INSIDE_TEMPERATURE_MEASUREMENT"
