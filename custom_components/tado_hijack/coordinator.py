@@ -250,7 +250,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             # Remove numeric suffix (e.g., "hot_water_2" -> "hot_water")
             base_name = (
                 entity_name.rsplit("_", 1)[0]
-                if entity_name[-1].isdigit() and "_" in entity_name
+                if entity_name and entity_name[-1].isdigit() and "_" in entity_name
                 else entity_name
             )
 
@@ -266,11 +266,10 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                         if "." in entity_entry.entity_id
                         else ""
                     )
-                    entry_base = (
-                        entry_name.rsplit("_", 1)[0]
-                        if entry_name and entry_name[-1].isdigit() and "_" in entry_name
-                        else entry_name
-                    )
+                    if entry_name and entry_name[-1].isdigit() and "_" in entry_name:
+                        entry_base = entry_name.rsplit("_", 1)[0]
+                    else:
+                        entry_base = entry_name
 
                     # Match by base name (handles _2, _3 suffixes)
                     if base_name == entry_base or entity_entry.entity_id == entity_id:
