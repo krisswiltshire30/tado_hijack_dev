@@ -1,3 +1,42 @@
+## [4.0.0-dev.3](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.2...v4.0.0-dev.3) (2026-01-29)
+
+### ✨ New Features
+
+* feat(core): consolidate next-gen zero-waste architecture and global timezone synchronization
+
+ZERO WASTE & OPTIMISTIC STATE PATCHING:
+- Implemented 'Zero Waste' principle where API write actions like overlays and resumes no longer trigger a confirmatory poll (async_refresh). Instead, the local coordinator state is patched optimistically immediately after the command is queued.
+- Automated Rollback Contexts ensure that every command carries a snapshot of the previous state so that if the API call fails or the worker crashes, the local state is automatically reverted to ensure data integrity.
+- Granular Patching logic includes specialized methods like _patch_zone_local and _patch_zone_resume to handle complex Tado state transitions (changing HVAC mode, temperature, and power simultaneously) locally in microseconds.
+
+POLLING INTELLIGENCE & QUOTA MANAGEMENT:
+- Weighted Quota Model dynamically calculates the polling interval using a hybrid model that reinvests API savings from the 'Economy Window' (night mode) into higher frequency polling during active hours.
+- Economy Window Priority ensures that the reduced polling profile (e.g., 1h interval at night) now has absolute priority over auto-quota calculations, ensuring predictable behavior regardless of the remaining budget.
+- Multi-Level Jitter is applied to prevent account bans at two levels when using a proxy: Batch-Level uses a base delay (1.0s) before processing command queues, and Call-Level uses additional randomized delays (0.5s) before sensitive calls.
+
+GLOBAL TIMEZONE SYNCHRONIZATION:
+- Global Reset Logic calculates the API Quota Reset using absolute 'Europe/Berlin' time (12:01 AM CET/CEST) via dt_util.get_time_zone, ensuring precise synchronization with Tado servers regardless of the Home Assistant local timezone.
+- Local Economy Window conversely follows the user's LOCAL time (dt_util.now()), ensuring the heating drops when the user actually sleeps, not when it is night in Berlin.
+
+HOT WATER & ZONES INTEGRATION:
+- Full Platform Support includes a dedicated 'water_heater' platform with specific capabilities for Tado Hot Water zones.
+- Unified Coordinator Logic integrates Hot Water control methods (async_set_hot_water_auto, _off, _heat) directly into the central coordinator, utilizing the same robust queueing and rollback mechanisms as heating zones.
+- Intelligent Discovery by the 'device_linker' now correctly maps devices to both 'climate' and 'water_heater' entities based on zone capabilities.
+
+AUTH-LAST CONFIG FLOW & PROXY BYPASS:
+- Redesigned Config Flow follows an 'Auth-Last' strategy where configuration of Polling, Quota, and Advanced settings happens BEFORE authentication.
+- Proxy Bypass allows users who provide an 'API Proxy URL' in the final step to skip the Tado Cloud OAuth flow entirely, creating the config entry immediately using the Proxy URL as a unique ID anchor.
+- Unified Wizard ensures that both initial setup and options flow now share the exact same 4-step wizard logic (DRY), providing a consistent user experience.
+
+CLEAN CODE & STABILITY:
+- Technical Debt removal included removing all 'type: ignore' hacks, fixing all Mypy/Ruff issues, and restoring full type safety with missing constants and types in coordinator.py.
+- UI Stability was improved by harmonizing TimeSelector usage to a standard format to prevent 'Unknown Error' crashes in Home Assistant Config Flows.
+- Reliability enhancements include immediate persistence of 'Reduced Polling Logic' switch states to the config entry and an automated Migration v6 that converts old hour-based intervals to seconds.
+
+Hot Water & Zones (co-authored by Kriss Wiltshire [#30](https://github.com/banter240/tado_hijack/pull/30))
+
+Co-authored-by: Kriss Wiltshire <krisswiltshire30@users.noreply.github.com>
+
 ## [4.0.0-dev.2](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.1...v4.0.0-dev.2) (2026-01-27)
 
 ### ✨ New Features
