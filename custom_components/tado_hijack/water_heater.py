@@ -80,6 +80,12 @@ class TadoHotWater(TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntit
     async def async_added_to_hass(self) -> None:
         """Update temperature limits from capabilities when added to hass."""
         await super().async_added_to_hass()
+
+        if not self.tado_coordinator._zone_supports_temperature(self._zone_id):  # noqa: SLF001
+            self._attr_supported_features = WaterHeaterEntityFeature.OPERATION_MODE
+            self.async_write_ha_state()
+            return
+
         capabilities = await self.tado_coordinator.async_get_capabilities(self._zone_id)
         if capabilities and capabilities.temperatures:
             self._attr_min_temp = float(capabilities.temperatures.celsius.min)
@@ -174,6 +180,13 @@ class TadoHotWater(TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntit
         """Set new target temperature."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
+            return
+
+        if not self.tado_coordinator._zone_supports_temperature(self._zone_id):  # noqa: SLF001
+            _LOGGER.warning(
+                "Hot water zone %d does not support temperature control",
+                self._zone_id,
+            )
             return
 
         # Round to integer for hot water (Tado requirement)

@@ -651,12 +651,13 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         """Set hot water zone to heat mode (manual overlay)."""
         setting: dict[str, Any] = {"type": "HOT_WATER", "power": "ON"}
 
-        state = self.data.zone_states.get(str(zone_id))
-        temp = TEMP_DEFAULT_HOT_WATER
-        if state and state.setting and state.setting.temperature:
-            temp = state.setting.temperature.celsius
-
-        setting["temperature"] = {"celsius": temp}
+        temp: float | None = None
+        if self._zone_supports_temperature(zone_id):
+            state = self.data.zone_states.get(str(zone_id))
+            temp = TEMP_DEFAULT_HOT_WATER
+            if state and state.setting and state.setting.temperature:
+                temp = state.setting.temperature.celsius
+            setting["temperature"] = {"celsius": temp}
 
         data = {
             "setting": setting,
@@ -1043,6 +1044,24 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         if refresh_after and not is_timed_overlay:
             self._schedule_queued_refresh()
 
+    def _zone_supports_temperature(self, zone_id: int) -> bool:
+        """Check if a zone supports temperature control in overlays.
+
+        For hot water zones, capabilities.temperatures can be truthy even when
+        the zone doesn't accept temperature in overlays (non-OpenTherm).
+        The reliable indicator is whether the zone's current state setting
+        includes a temperature value.
+        """
+        zone = self.zones_meta.get(zone_id)
+        ztype = getattr(zone, "type", ZONE_TYPE_HEATING) if zone else ZONE_TYPE_HEATING
+
+        if ztype == ZONE_TYPE_HOT_WATER:
+            state = self.data.zone_states.get(str(zone_id))
+            return bool(state and state.setting and state.setting.temperature)
+
+        # Heating/AC zones always support temperature
+        return True
+
     async def async_set_zone_overlay(
         self,
         zone_id: int,
@@ -1055,11 +1074,19 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         refresh_after: bool = False,
     ) -> None:
         """Set a manual overlay with timer/duration support."""
-        # Central Validation: Check if temperature control is supported
         final_temp = temperature
+        supports_temp = self._zone_supports_temperature(zone_id)
+
+        if not supports_temp and final_temp is not None:
+            _LOGGER.warning(
+                "Zone %d does not support temperature control, ignoring temperature=%s",
+                zone_id,
+                final_temp,
+            )
+            final_temp = None
 
         # Resolve fallback temperature if missing for ON state
-        if final_temp is None and power == POWER_ON:
+        if final_temp is None and power == POWER_ON and supports_temp:
             zone = self.zones_meta.get(zone_id)
             ztype = (
                 getattr(zone, "type", ZONE_TYPE_HEATING) if zone else ZONE_TYPE_HEATING
@@ -1070,16 +1097,6 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                 final_temp = TEMP_DEFAULT_AC
             else:
                 final_temp = TEMP_DEFAULT_HEATING
-
-        if final_temp is not None and power == "ON":
-            capabilities = self.data.capabilities.get(zone_id)
-            if not capabilities or not capabilities.temperatures:
-                _LOGGER.warning(
-                    "Zone %d does not support temperature control, ignoring temperature=%s",
-                    zone_id,
-                    final_temp,
-                )
-                final_temp = None
 
         data = build_overlay_data(
             zone_id=zone_id,
@@ -1140,11 +1157,22 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         self.async_update_listeners()
 
         for zone_id in zone_ids:
+            # Per-zone temperature support check (mirrors async_set_zone_overlay)
+            zone_temp = temperature
+            if zone_temp is not None and not self._zone_supports_temperature(zone_id):
+                _LOGGER.warning(
+                    "Zone %d does not support temperature control, "
+                    "ignoring temperature=%s",
+                    zone_id,
+                    zone_temp,
+                )
+                zone_temp = None
+
             data = build_overlay_data(
                 zone_id=zone_id,
                 zones_meta=self.zones_meta,
                 power=power,
-                temperature=temperature,
+                temperature=zone_temp,
                 duration=duration,
                 overlay_mode=overlay_mode,
                 overlay_type=overlay_type,
