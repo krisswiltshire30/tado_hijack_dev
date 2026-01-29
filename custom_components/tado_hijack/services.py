@@ -58,10 +58,14 @@ def _parse_service_call_data(call: ServiceCall) -> dict[str, Any]:
     duration_minutes = int(duration) if duration else None
     overlay_mode = _parse_and_get_overlay_mode(call, duration_minutes)
 
+    operation_mode = call.data.get("hvac_mode") or call.data.get("operation_mode")
+    if operation_mode:
+        operation_mode = operation_mode.lower()
+
     return {
         "duration": duration_minutes,
         "overlay": overlay_mode,
-        "operation_mode": call.data.get("hvac_mode") or call.data.get("operation_mode"),
+        "operation_mode": operation_mode,
         "temperature": call.data.get("temperature"),
         "refresh_after": call.data.get("refresh_after", False),
     }
@@ -75,35 +79,29 @@ def _validate_service_params(
     is_water_heater: bool = False,
 ) -> None:
     """Validate service parameters against the allowed matrix (DRY)."""
-    # 1. 'auto' (Resume Schedule) must be clean
+    # 1. 'auto' (Resume Schedule) validation
     if operation_mode == "auto":
-        # Allow overlay_mode to be 'manual' (the UI default) but nothing else
-        if (
-            temperature is not None
-            or duration is not None
-            or (overlay_mode is not None and overlay_mode != "manual")
-        ):
+        # Block temperature for auto, but ignore duration/overlay (redundant in UI)
+        if temperature is not None:
             raise ServiceValidationError(
                 f"When setting {'water heater' if is_water_heater else 'mode'} to 'auto' (Resume Schedule), "
-                "you cannot provide a temperature, duration, or a non-default overlay mode. "
-                "The smart schedule will take full control."
+                "you cannot provide a target temperature. The smart schedule will take full control."
             )
         return
 
-    # 2. 'off' cannot have a temperature
-    if operation_mode == POWER_OFF and temperature is not None:
-        raise ServiceValidationError(
-            f"When setting {'water heater' if is_water_heater else 'mode'} to 'off', "
-            "you cannot provide a target temperature."
-        )
+    # 2. 'off' validation
+    if operation_mode == "off":
+        # Block temperature for off, but ignore duration/overlay
+        if temperature is not None:
+            raise ServiceValidationError(
+                f"When setting {'water heater' if is_water_heater else 'mode'} to 'off', "
+                "you cannot provide a target temperature."
+            )
+        return
 
-    # 3. 'heat' must have a temperature
-    if operation_mode == "heat" and temperature is None:
-        range_str = "30 and 65°C" if is_water_heater else "5 and 30°C"
-        raise ServiceValidationError(
-            f"Temperature must be provided when setting {'water heater' if is_water_heater else 'mode'} to 'heat'. "
-            f"Please specify a target temperature between {range_str}."
-        )
+    # 3. 'heat' validation
+    # No mandatory temperature check here because the coordinator handles fallbacks.
+    return
 
 
 async def async_setup_services(
@@ -194,7 +192,7 @@ async def async_setup_services(
             )
             return
 
-        if operation_mode == POWER_OFF:
+        if operation_mode == "off":
             await coordinator.async_set_hot_water_off(
                 zone_id, refresh_after=refresh_after
             )

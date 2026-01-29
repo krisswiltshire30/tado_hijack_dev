@@ -54,6 +54,9 @@ from .const import (
     POWER_OFF,
     POWER_ON,
     SECONDS_PER_HOUR,
+    TEMP_DEFAULT_AC,
+    TEMP_DEFAULT_HEATING,
+    TEMP_DEFAULT_HOT_WATER,
     ZONE_TYPE_AIR_CONDITIONING,
     ZONE_TYPE_HEATING,
     ZONE_TYPE_HOT_WATER,
@@ -514,6 +517,18 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         power = POWER_OFF if hvac_mode == "off" else POWER_ON
 
         final_temp = temperature
+        if final_temp is None and power == POWER_ON:
+            zone = self.zones_meta.get(zone_id)
+            ztype = (
+                getattr(zone, "type", ZONE_TYPE_HEATING) if zone else ZONE_TYPE_HEATING
+            )
+            if ztype == ZONE_TYPE_HOT_WATER:
+                final_temp = TEMP_DEFAULT_HOT_WATER
+            elif ztype == ZONE_TYPE_AIR_CONDITIONING:
+                final_temp = TEMP_DEFAULT_AC
+            else:
+                final_temp = TEMP_DEFAULT_HEATING
+
         if final_temp is not None:
             zone = self.zones_meta.get(zone_id)
             if zone and getattr(zone, "type", "") == ZONE_TYPE_HOT_WATER:
@@ -633,8 +648,11 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         setting: dict[str, Any] = {"type": "HOT_WATER", "power": "ON"}
 
         state = self.data.zone_states.get(str(zone_id))
+        temp = TEMP_DEFAULT_HOT_WATER
         if state and state.setting and state.setting.temperature:
-            setting["temperature"] = {"celsius": state.setting.temperature.celsius}
+            temp = state.setting.temperature.celsius
+
+        setting["temperature"] = {"celsius": temp}
 
         data = {
             "setting": setting,
@@ -1031,6 +1049,20 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         """Set a manual overlay with timer/duration support."""
         # Central Validation: Check if temperature control is supported
         final_temp = temperature
+
+        # Resolve fallback temperature if missing for ON state
+        if final_temp is None and power == POWER_ON:
+            zone = self.zones_meta.get(zone_id)
+            ztype = (
+                getattr(zone, "type", ZONE_TYPE_HEATING) if zone else ZONE_TYPE_HEATING
+            )
+            if ztype == ZONE_TYPE_HOT_WATER:
+                final_temp = TEMP_DEFAULT_HOT_WATER
+            elif ztype == ZONE_TYPE_AIR_CONDITIONING:
+                final_temp = TEMP_DEFAULT_AC
+            else:
+                final_temp = TEMP_DEFAULT_HEATING
+
         if final_temp is not None and power == "ON":
             capabilities = self.data.capabilities.get(zone_id)
             if not capabilities or not capabilities.temperatures:
