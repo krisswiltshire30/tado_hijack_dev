@@ -1,3 +1,12 @@
+## [4.0.0-dev.10](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.9...v4.0.0-dev.10) (2026-01-29)
+
+### 🐛 Bug Fixes
+
+* fix(data_manager): resolve initialization gap for start-up values
+
+- Implemented selective local-state fallback during the initial cold-start poll to prevent startup values from being dropped.
+- Refined logic to ensure local variables are only used when coordinator.data is None, maintaining the coordinator as the sole source of truth during regular operation.
+
 ## [4.0.0-dev.9](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.8...v4.0.0-dev.9) (2026-01-29)
 
 ### ✨ New Features
