@@ -83,10 +83,19 @@ def parse_hot_water_in_use(state: Any) -> bool:
     if not state or not getattr(state, "activity_data_points", None):
         return False
 
+    # 1. Primary: Explicit Hot Water flag
     if (
         hasattr(state.activity_data_points, "hot_water_in_use")
         and state.activity_data_points.hot_water_in_use
     ):
-        return str(state.activity_data_points.hot_water_in_use.value) == "ON"
+        if str(state.activity_data_points.hot_water_in_use.value) == "ON":
+            return True
+
+    # 2. Secondary: Fallback to heating power (some boilers report activity here)
+    if (
+        hasattr(state.activity_data_points, "heating_power")
+        and state.activity_data_points.heating_power
+    ):
+        return float(state.activity_data_points.heating_power.percentage) > 0
 
     return False

@@ -160,7 +160,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         self._climate_to_zone: dict[str, int] = {}
         self._polling_calls_today = 0
         self._last_quota_reset: datetime | None = None
-        self._reset_poll_unsub: asyncio.TimerHandle | None = None  # gitleaks:allow
+        self._reset_poll_unsub: asyncio.TimerHandle | None = None
         self._post_action_poll_timer: asyncio.TimerHandle | None = None
         self._expiry_timers: set[asyncio.TimerHandle] = set()
         self._force_next_update: bool = False
@@ -647,13 +647,22 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         if refresh_after:
             self._schedule_queued_refresh()
 
-    async def async_set_hot_water_heat(self, zone_id: int):
+    async def async_set_hot_water_heat(
+        self, zone_id: int, temperature: float | None = None
+    ):
         """Set hot water zone to heat mode (manual overlay)."""
         setting: dict[str, Any] = {"type": "HOT_WATER", "power": "ON"}
 
         state = self.data.zone_states.get(str(zone_id))
-        temp = TEMP_DEFAULT_HOT_WATER
-        if state and state.setting and state.setting.temperature:
+        temp = temperature or TEMP_DEFAULT_HOT_WATER
+
+        # If no temp provided, try to get from current state as secondary fallback
+        if (
+            temperature is None
+            and state
+            and state.setting
+            and state.setting.temperature
+        ):
             temp = state.setting.temperature.celsius
 
         setting["temperature"] = {"celsius": temp}
