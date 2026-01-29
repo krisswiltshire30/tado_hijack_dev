@@ -661,7 +661,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
 
         old_state = patch_zone_overlay(self.data.zone_states.get(str(zone_id)), data)
 
-        self.optimistic.set_zone(zone_id, True, operation_mode="heat")
+        self.optimistic.set_zone(zone_id, True, operation_mode="heat", temperature=temp)
         self.async_update_listeners()
 
         self.api_manager.queue_command(
@@ -1085,7 +1085,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
 
         old_state = patch_zone_overlay(self.data.zone_states.get(str(zone_id)), data)
 
-        self.optimistic.set_zone(zone_id, optimistic_value, power=power)
+        self.optimistic.set_zone(
+            zone_id, optimistic_value, power=power, temperature=final_temp
+        )
         self.async_update_listeners()
 
         self.api_manager.queue_command(
@@ -1121,7 +1123,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         )
 
         for zone_id in zone_ids:
-            self.optimistic.set_zone(zone_id, True, power=power)
+            self.optimistic.set_zone(
+                zone_id, True, power=power, temperature=temperature
+            )
         self.async_update_listeners()
 
         for zone_id in zone_ids:

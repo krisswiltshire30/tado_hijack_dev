@@ -168,6 +168,15 @@ class TadoClimateEntity(TadoZoneEntity, TadoOptimisticMixin, ClimateEntity):
         if self.hvac_mode == HVACMode.OFF:
             return None
 
+        # 1. Check Optimistic Temperature
+        if (
+            opt_temp := self.tado_coordinator.optimistic.get_zone_temperature(
+                self._zone_id
+            )
+        ) is not None:
+            return float(opt_temp)
+
+        # 2. Real API State
         state = self._current_state
         if state and state.setting and state.setting.temperature:
             if temp := getattr(state.setting.temperature, "celsius", None):
@@ -249,7 +258,6 @@ class TadoAirConditioning(TadoClimateEntity):
         | ClimateEntityFeature.FAN_MODE
         | ClimateEntityFeature.SWING_MODE
     )
-    _attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL, HVACMode.AUTO]
     _attr_min_temp = TEMP_MIN_AC
     _attr_max_temp = TEMP_MAX_AC
     _attr_target_temperature_step = TEMP_STEP_AC
@@ -269,8 +277,54 @@ class TadoAirConditioning(TadoClimateEntity):
         self._attr_unique_id = (
             f"{coordinator.config_entry.entry_id}_climate_ac_{zone_id}"
         )
+        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.COOL, HVACMode.AUTO]
+
+    async def _async_update_capabilities(self) -> None:
+        """Fetch and refresh capabilities."""
+        if not (
+            capabilities := await self.tado_coordinator.async_get_capabilities(
+                self._zone_id
+            )
+        ):
+            return
+        # Update Temperature Limits
+        if capabilities.temperatures:
+            new_min = float(capabilities.temperatures.celsius.min)
+            new_max = float(capabilities.temperatures.celsius.max)
+            new_step = float(capabilities.temperatures.celsius.step)
+
+            if new_min < new_max and new_step > 0:
+                self._attr_min_temp = new_min
+                self._attr_max_temp = new_max
+                self._attr_target_temperature_step = new_step
+
+        # Update Supported HVAC Modes dynamically
+        modes = [HVACMode.OFF, HVACMode.AUTO]
+        if getattr(capabilities, "cool", None):
+            modes.append(HVACMode.COOL)
+        if getattr(capabilities, "heat", None):
+            modes.append(HVACMode.HEAT)
+        if getattr(capabilities, "dry", None):
+            modes.append(HVACMode.DRY)
+        if getattr(capabilities, "fan", None):
+            modes.append(HVACMode.FAN_ONLY)
+
+        self._attr_hvac_modes = modes
+        self.async_write_ha_state()
 
     def _get_active_hvac_mode(self) -> HVACMode:
+        """Return hvac mode when power is ON based on current state."""
+        state = self._current_state
+        if state and state.setting and state.setting.mode:
+            mode = str(state.setting.mode).lower()
+            if mode == "cool":
+                return HVACMode.COOL
+            if mode == "heat":
+                return HVACMode.HEAT
+            if mode == "dry":
+                return HVACMode.DRY
+            if mode == "fan":
+                return HVACMode.FAN_ONLY
         return HVACMode.COOL
 
     def _is_active(self, state: Any) -> bool:

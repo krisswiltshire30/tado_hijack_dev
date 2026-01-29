@@ -117,16 +117,19 @@ class TadoHotWater(TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntit
 
     @property
     def target_temperature(self) -> float | None:
-        """Return the target water temperature.
-
-        Returns None if:
-        - Hot water is off
-        - Zone state unavailable
-        - System doesn't support temperature control (no temp in state)
-        """
+        """Return the target water temperature."""
         if self.current_operation == OPERATION_MODE_OFF:
             return None
 
+        # 1. Check Optimistic Temperature
+        if (
+            opt_temp := self.tado_coordinator.optimistic.get_zone_temperature(
+                self._zone_id
+            )
+        ) is not None:
+            return float(opt_temp)
+
+        # 2. Real API State
         state = self.tado_coordinator.data.zone_states.get(str(self._zone_id))
         if state is None:
             return None

@@ -67,6 +67,7 @@ class OptimisticManager:
         overlay: bool | None,
         power: str | None = None,
         operation_mode: str | None = None,
+        temperature: float | None = None,
     ) -> None:
         """Set optimistic zone overlay state."""
         self.set_optimistic("zone", zone_id, "overlay", overlay)
@@ -74,6 +75,8 @@ class OptimisticManager:
             self.set_optimistic("zone", zone_id, "power", power)
         if operation_mode is not None:
             self.set_optimistic("zone", zone_id, "operation_mode", operation_mode)
+        if temperature is not None:
+            self.set_optimistic("zone", zone_id, "temperature", temperature)
 
     def set_child_lock(self, serial_no: str, enabled: bool) -> None:
         """Set optimistic child lock state."""
@@ -116,6 +119,10 @@ class OptimisticManager:
         return cast(
             "str | None", self.get_optimistic("zone", zone_id, "operation_mode")
         )
+
+    def get_zone_temperature(self, zone_id: int) -> float | None:
+        """Return optimistic zone temperature if not expired."""
+        return cast("float | None", self.get_optimistic("zone", zone_id, "temperature"))
 
     def get_child_lock(self, serial_no: str) -> bool | None:
         """Return optimistic child lock state if not expired."""
