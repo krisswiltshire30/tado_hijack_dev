@@ -10,6 +10,7 @@ from homeassistant.components.water_heater import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     TEMP_MAX_HOT_WATER,
@@ -51,7 +52,9 @@ async def async_setup_entry(
         _LOGGER.debug("No hot water zones found")
 
 
-class TadoHotWater(TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntity):
+class TadoHotWater(
+    TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntity, RestoreEntity
+):
     """Representation of a Tado hot water zone."""
 
     _attr_supported_features = (
@@ -79,8 +82,21 @@ class TadoHotWater(TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntit
         self._last_target_temp: float | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Update temperature limits from capabilities when added to hass."""
+        """Handle entity being added to Home Assistant."""
         await super().async_added_to_hass()
+
+        # Restore last known temperature from HA state machine
+        if last_state := await self.async_get_last_state():
+            if "last_target_temperature" in last_state.attributes:
+                self._last_target_temp = float(
+                    last_state.attributes["last_target_temperature"]
+                )
+                _LOGGER.debug(
+                    "Hot Water Zone %d: Restored last_target_temp: %s",
+                    self._zone_id,
+                    self._last_target_temp,
+                )
+
         capabilities = await self.tado_coordinator.async_get_capabilities(self._zone_id)
         if capabilities and capabilities.temperatures:
             self._attr_min_temp = float(capabilities.temperatures.celsius.min)
@@ -90,6 +106,13 @@ class TadoHotWater(TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntit
                     capabilities.temperatures.celsius.step
                 )
             self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return entity specific state attributes."""
+        return {
+            "last_target_temperature": self._last_target_temp,
+        }
 
     @property
     def current_operation(self) -> str:
