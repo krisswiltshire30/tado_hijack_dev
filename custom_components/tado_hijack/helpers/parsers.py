@@ -61,3 +61,40 @@ def get_ac_capabilities(capabilities: Capabilities) -> dict[str, set[str]]:
         "vertical_swing": v_swings,
         "horizontal_swings": h_swings,
     }
+
+
+def parse_heating_power(state: Any) -> float:
+    """Extract heating power percentage from zone state."""
+    if not state or not getattr(state, "activity_data_points", None):
+        return 0.0
+
+    # Heating Power (Percentage)
+    if (
+        hasattr(state.activity_data_points, "heating_power")
+        and state.activity_data_points.heating_power
+    ):
+        return float(state.activity_data_points.heating_power.percentage)
+
+    return 0.0
+
+
+def parse_hot_water_in_use(state: Any) -> bool:
+    """Extract hot water activity status from zone state."""
+    if not state or not getattr(state, "activity_data_points", None):
+        return False
+
+    # 1. Primary: Explicit Hot Water flag
+    if (
+        hasattr(state.activity_data_points, "hot_water_in_use")
+        and state.activity_data_points.hot_water_in_use
+    ) and str(state.activity_data_points.hot_water_in_use.value) == "ON":
+        return True
+
+    # 2. Secondary: Fallback to heating power (some boilers report activity here)
+    if (
+        hasattr(state.activity_data_points, "heating_power")
+        and state.activity_data_points.heating_power
+    ):
+        return float(state.activity_data_points.heating_power.percentage) > 0
+
+    return False

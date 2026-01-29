@@ -1,3 +1,247 @@
+## [4.0.0-dev.9](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.8...v4.0.0-dev.9) (2026-01-29)
+
+### ✨ New Features
+
+* feat(core): implement comprehensive state persistence, polling track isolation and architectural polish
+
+This major update consolidates architectural improvements, stability enhancements and critical bug fixes to harden the integration against state flickering and API pollution.
+
+Core Architecture & State:
+- State Persistence: Migrated TadoClimateEntity and TadoHotWater to RestoreEntity. Implemented tracking and restoration of target temperatures via 'last_target_temperature' extra state attribute, ensuring continuity across restarts.
+- Polling Engine Refactoring: Redesigned TadoDataManager with independent initialization flags (_metadata_init, _zones_init, _presence_init). Enforces strict track separation and prevents redundant API calls.
+- Task Dispatching: Migrated DataManager from lambda closures to explicit method references for PollTask execution, improving traceability and stability.
+- Optimistic UI: Implemented optimistic temperature tracking for AC and hot water sliders to eliminate UI 'jumping' during manual adjustments.
+
+Functional Enhancements & Logic:
+- Hot Water Evolution: Integrated dynamic temperature control detection for non-OpenTherm boilers and added heating-power fallback to the activity parser.
+- Polling Optimization: Implemented lazy capabilities fetching in the slow poll track to reduce API quota consumption by ~30% in large setups.
+- Unified Discovery: Refactored zone and device iteration loops to use centralized yield_zones/yield_devices helpers, ensuring consistent filtering project-wide.
+- Manual Poll Härtung: Hardened force-flag reset logic to occur only after confirmed API success, preventing lost user-driven updates.
+
+Maintenance & Cleanup:
+- Standards: Adjusted default hot water fallback to 30°C and applied gitleaks allow-list markers to configuration migrations.
+- Hygiene: Stripped technical debt meta-comments (noqa, sourcery skip) project-wide and removed deprecated TadoHotWaterSwitch class.
+- Validation: Resolved all Mypy/Ruff errors and ensured full compatibility with Home Assistant 2024.x+ standards.
+
+Co-authored-by: krisswiltshire30 <kriss.wiltshire@googlemail.com>
+
+## [4.0.0-dev.8](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.7...v4.0.0-dev.8) (2026-01-29)
+
+### 🐛 Bug Fixes
+
+* fix(core): optimize optimistic state orchestration and clean up internal logic
+
+This structural update ensures stable UI feedback and triggers a release:
+- Centralized optimistic state logic into 'apply_zone_state' helper.
+- Fixed UI inconsistencies between Climate and WaterHeater entities.
+- Resolved method nesting issues in coordinator.py.
+- Improved 'Boost All' and 'Turn Off All' immediate UI feedback.
+
+## [4.0.0-dev.7](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.6...v4.0.0-dev.7) (2026-01-29)
+
+### 🐛 Bug Fixes
+
+* fix(core): resolve UI mode flickering and persistent temperatures
+
+Ensures absolute UI consistency during mode transitions:
+- Explicitly clears optimistic state when resuming schedules to prevent target temperatures from 'sticking'.
+- Synchronizes 'power' and 'operation_mode' keys in OptimisticManager to keep both Climate and WaterHeater entities stable during manual overlays.
+- Eliminates the 'UI Auto vs App Heat' discrepancy by enforcing correct optimistic overlay markers.
+
+## [4.0.0-dev.6](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.5...v4.0.0-dev.6) (2026-01-29)
+
+### 🐛 Bug Fixes
+
+* fix(core): enhance UI stability with optimistic temperatures and dynamic AC modes
+
+This comprehensive stability update ensures a seamless user experience:
+- Implemented optimistic temperature tracking in 'OptimisticManager' to prevent UI sliders from jumping or disappearing.
+- Added 'last known temperature' memory to climate entities for intelligent restoration when switching to HEAT mode.
+- Centralized temperature fallback logic in the Coordinator (DRY) to prevent 422 API errors.
+- Transformed AC entities to use dynamic HVAC modes based on hardware capabilities (HEAT/DRY/FAN support).
+- Optimized service validation to allow mode switching without redundant error prompts.
+
+## [4.0.0-dev.5](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.4...v4.0.0-dev.5) (2026-01-29)
+
+### 🐛 Bug Fixes
+
+* fix(services): implement robust temperature fallbacks, resolve mode case-sensitivity and establish design documentation
+
+This update resolves critical service issues and enhances documentation:
+- Resolved 422 'temperature required' errors by implementing automatic default temperature resolution in the coordinator.
+- Fixed 'Unsupported operation_mode' errors by normalizing all mode comparisons to lowercase.
+- Refined service validation to be mode-aware, allowing seamless UI switching without redundant error blocks.
+- Added comprehensive design documentation in 'docs/DESIGN.md' including high-depth system schematics and quota logic distribution.
+
+
+### 📚 Documentation
+
+* docs(ci/readme): update service examples and integrate local HACS/hassfest validation
+
+This clean commit includes:
+- Corrected mandatory fields in README service examples.
+- Fixed Table of Contents links in README.
+- Added local pre-commit hooks for Home Assistant and HACS validation.
+
+## [4.0.0-dev.4](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.3...v4.0.0-dev.4) (2026-01-29)
+
+### ✨ New Features
+
+* feat(core): major architectural overhaul, migration v6 and service standardization
+
+This update implements a modular helper-based architecture, completes the v6 migration
+and standardizes service interactions across all platforms while hardening the system against
+common failures.
+
+ARCHITECTURE & MODULARITY:
+- EntityResolver: Centralized HomeKit/Hijack entity resolution logic into a dedicated helper.
+- PropertyManager: Standardized hardware property updates via generic dispatchers.
+- DiscoveryManager: Unified zone and device discovery loops.
+- TadoEventHandler: Isolated HA event bus integration for optimistic triggers.
+- Coordinator: Reduced bloat by ~40% by offloading business logic to specialized managers.
+
+SERVICE STANDARDIZATION & VALIDATION:
+- HVAC Mode Standard: Refactored 'set_mode' and 'set_mode_all_zones' to use standard 'hvac_mode' (off, heat, auto).
+- Validation Matrix: Implemented central 'Pre-Validation' (DRY) to block invalid parameter combinations (e.g. heat without temp) before making API calls.
+- Sensible Defaults: Established logic-aware defaults (heat mode @ 21C / 50C) and improved UI flow by making 'overlay' a required field.
+- DRY Schema: Centralized parameter validation and YAML schema using anchors/aliases for maintainability.
+
+STATE, DATA INTEGRITY & POLLING:
+- Migration v6: Implemented mandatory reset of polling intervals to correct unit confusion.
+- JIT Poll Planning: Replaced boolean flags with high-precision timestamps for plan-driven polling (Zero-Waste).
+- Intelligent Polling: Implemented smart 'refresh_after' logic that suppresses redundant polls during active timers, deferred until expiry.
+- Dynamic Optimistic Store: Implemented a maintenance-free key-value store for all optimistic states.
+- Functional Helpers: Extracted state patching (state_patcher) and API payload construction (overlay_builder) into utility modules.
+
+ROBUSTNESS & AUTH:
+- Error Capturing: Enhanced TadoRequestHandler to capture and log actual API response bodies, providing detailed feedback for 422 errors.
+- Auth Fix: Corrected token polling logic to prevent TadoConnectionError during initial OAuth device authorization.
+- Setup Guard: Fixed ValueError in config_flow by validating source before accessing reauth entries during fresh installs.
+
+DOCUMENTATION:
+- README Sync: Updated documentation to match all architectural changes and standardized YAML service examples.
+- Technical Detail: Restored precise descriptions for Auto Quota math and Reset-Sync (12:01 AM Berlin).
+
+## [4.0.0-dev.3](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.2...v4.0.0-dev.3) (2026-01-29)
+
+### ✨ New Features
+
+* feat(core): consolidate next-gen zero-waste architecture and global timezone synchronization
+
+ZERO WASTE & OPTIMISTIC STATE PATCHING:
+- Implemented 'Zero Waste' principle where API write actions like overlays and resumes no longer trigger a confirmatory poll (async_refresh). Instead, the local coordinator state is patched optimistically immediately after the command is queued.
+- Automated Rollback Contexts ensure that every command carries a snapshot of the previous state so that if the API call fails or the worker crashes, the local state is automatically reverted to ensure data integrity.
+- Granular Patching logic includes specialized methods like _patch_zone_local and _patch_zone_resume to handle complex Tado state transitions (changing HVAC mode, temperature, and power simultaneously) locally in microseconds.
+
+POLLING INTELLIGENCE & QUOTA MANAGEMENT:
+- Weighted Quota Model dynamically calculates the polling interval using a hybrid model that reinvests API savings from the 'Economy Window' (night mode) into higher frequency polling during active hours.
+- Economy Window Priority ensures that the reduced polling profile (e.g., 1h interval at night) now has absolute priority over auto-quota calculations, ensuring predictable behavior regardless of the remaining budget.
+- Multi-Level Jitter is applied to prevent account bans at two levels when using a proxy: Batch-Level uses a base delay (1.0s) before processing command queues, and Call-Level uses additional randomized delays (0.5s) before sensitive calls.
+
+GLOBAL TIMEZONE SYNCHRONIZATION:
+- Global Reset Logic calculates the API Quota Reset using absolute 'Europe/Berlin' time (12:01 AM CET/CEST) via dt_util.get_time_zone, ensuring precise synchronization with Tado servers regardless of the Home Assistant local timezone.
+- Local Economy Window conversely follows the user's LOCAL time (dt_util.now()), ensuring the heating drops when the user actually sleeps, not when it is night in Berlin.
+
+HOT WATER & ZONES INTEGRATION:
+- Full Platform Support includes a dedicated 'water_heater' platform with specific capabilities for Tado Hot Water zones.
+- Unified Coordinator Logic integrates Hot Water control methods (async_set_hot_water_auto, _off, _heat) directly into the central coordinator, utilizing the same robust queueing and rollback mechanisms as heating zones.
+- Intelligent Discovery by the 'device_linker' now correctly maps devices to both 'climate' and 'water_heater' entities based on zone capabilities.
+
+AUTH-LAST CONFIG FLOW & PROXY BYPASS:
+- Redesigned Config Flow follows an 'Auth-Last' strategy where configuration of Polling, Quota, and Advanced settings happens BEFORE authentication.
+- Proxy Bypass allows users who provide an 'API Proxy URL' in the final step to skip the Tado Cloud OAuth flow entirely, creating the config entry immediately using the Proxy URL as a unique ID anchor.
+- Unified Wizard ensures that both initial setup and options flow now share the exact same 4-step wizard logic (DRY), providing a consistent user experience.
+
+CLEAN CODE & STABILITY:
+- Technical Debt removal included removing all 'type: ignore' hacks, fixing all Mypy/Ruff issues, and restoring full type safety with missing constants and types in coordinator.py.
+- UI Stability was improved by harmonizing TimeSelector usage to a standard format to prevent 'Unknown Error' crashes in Home Assistant Config Flows.
+- Reliability enhancements include immediate persistence of 'Reduced Polling Logic' switch states to the config entry and an automated Migration v6 that converts old hour-based intervals to seconds.
+
+Hot Water & Zones (co-authored by Kriss Wiltshire [#30](https://github.com/banter240/tado_hijack/pull/30))
+
+Co-authored-by: Kriss Wiltshire <krisswiltshire30@users.noreply.github.com>
+
+## [4.0.0-dev.2](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.1...v4.0.0-dev.2) (2026-01-27)
+
+### ✨ New Features
+
+* feat(core): implement zero-waste architecture, entity migration and data integrity
+
+This major update finalizes the architectural shift to a fully optimized, zero-waste system
+and resolves critical entity conflicts via automatic migration.
+
+ZERO WASTE ARCHITECTURE:
+- Universal Rollback: Robust transaction system for all write actions (Presence, Overlays,
+  Child Lock, Offset).
+- Local State Patching: Updates UI immediately without triggering confirmatory API polls.
+- Safety Net: Automatic rollback to previous local state if API calls fail.
+- No-Poll Policy: Eliminated all 'refresh after action' logic for maximum quota efficiency.
+
+ENTITY MIGRATION & HOT WATER:
+- Entity Cleanup: Automatic migration to remove legacy '_hw_' switch entities that
+  conflicted with the new water_heater platform.
+- Unique ID Strategy: Changed water_heater ID schema to '_water_heater_' to prevent
+  collisions.
+- Type Safety: Fixed Mypy errors in entity and coordinator classes.
+
+REFACTORING:
+- CommandMerger: Simplified via dispatch map and integrated rollback context.
+- Meta-Cleanup: Removed non-essential comments.
+
+NEW FEATURES:
+- Added 'button.refresh_presence' for manual state checks without full polls.
+
+DOCUMENTATION:
+- Auto Quota: Updated technical description to reflect stateless predictive consumption model.
+- Diagnostics: Relocated detailed privacy info to Troubleshooting section for better support flow.
+- Privacy: Refined safety statement to 'should be safe' and added manual verification advice.
+- Zero Waste: Explicitly documented the new write strategy in the API Consumption section.
+
+## [4.0.0-dev.1](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.15...v4.0.0-dev.1) (2026-01-27)
+
+### ⚠ BREAKING CHANGES
+
+* **core:** The migration to advanced presence polling changes internal track
+handling. Config entry versions have been bumped to ensure clean state hydration.
+
+Co-authored-by: krisswiltshire30 <kriss.wiltshire@googlemail.com>
+
+### ✨ New Features
+
+* feat(core): implement advanced presence polling, adaptive quota and expert-level diagnostics
+
+This massive update stabilizes the core architecture for highly restricted API environments
+and introduces a military-grade privacy layer for diagnostic reporting.
+
+CORE ARCHITECTURE:
+- Presence Polling Evolution: Replaced legacy polling with advanced tracks using sequential
+  state handling to minimize race conditions and API overhead.
+- Adaptive Quota Brain: Implemented stateless, predictive quota calculation. The system
+  now intelligently adjusts polling intervals based on remaining 'API Gold' and daily reset
+  targets (12:01 Berlin).
+- Safety Thresholds: Integrated a dynamic buffer that prioritizes manual user actions and
+  automations over periodic background polling when quota is low.
+
+PLATFORM STABILIZATION:
+- Hot Water Restoration: Fully restored the water_heater platform. Fixed temperature
+  reporting (None for non-temp hardware) and optimized service selectors for environment
+  independence.
+- Sensor Noise Reduction: Eliminated excessive debug logging in valve state updates.
+
+EXPERT-LEVEL DIAGNOSTICS & PRIVACY:
+- Multi-Layer Anonymization: Diagnostic reports are now safe for public support.
+- Key Pseudonymization: HA Entity-IDs in JSON keys are transformed into unique hashes
+  (e.g., entity_8a3f), protecting room names while maintaining machine-readability.
+- Global PII Masking: Hard redaction for serials (VA, RU, IB), emails, geo-coordinates,
+  and cryptographic secrets (Tokens, Hashes, Salts) via intelligent Regex.
+- Contextual Redaction: Automatically identifies and replaces sensitive fields from
+  all tadoasync models (username, firstname, mobile_number, etc.).
+
+DOCUMENTATION:
+- Fully updated README covering the new consumption strategy, architecture highlights,
+  and the experts-only diagnostics system.
+- Cleaned up all internal 'v4' references to maintain public release consistency.
+
 ## [3.1.0-dev.15](https://github.com/banter240/tado_hijack/compare/v3.1.0-dev.14...v3.1.0-dev.15) (2026-01-25)
 
 ### 🐛 Bug Fixes

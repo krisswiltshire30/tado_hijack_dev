@@ -6,6 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
 
 from .const import (
     DOMAIN,
@@ -57,13 +58,50 @@ def _parse_service_call_data(call: ServiceCall) -> dict[str, Any]:
     duration_minutes = int(duration) if duration else None
     overlay_mode = _parse_and_get_overlay_mode(call, duration_minutes)
 
+    operation_mode = call.data.get("hvac_mode") or call.data.get("operation_mode")
+    if operation_mode:
+        operation_mode = operation_mode.lower()
+
     return {
         "duration": duration_minutes,
         "overlay": overlay_mode,
-        "power": call.data.get("power", POWER_ON),
+        "operation_mode": operation_mode,
         "temperature": call.data.get("temperature"),
-        "operation_mode": call.data.get("operation_mode"),
+        "refresh_after": call.data.get("refresh_after", False),
     }
+
+
+def _validate_service_params(
+    operation_mode: str | None,
+    temperature: float | None,
+    duration: int | None,
+    overlay_mode: str | None,
+    is_water_heater: bool = False,
+) -> None:
+    """Validate service parameters against the allowed matrix (DRY)."""
+    # 1. 'auto' (Resume Schedule) validation
+    if operation_mode == "auto":
+        # Block temperature for auto, but ignore duration/overlay (redundant in UI)
+        if temperature is not None:
+            raise ServiceValidationError(
+                f"When setting {'water heater' if is_water_heater else 'mode'} to 'auto' (Resume Schedule), "
+                "you cannot provide a target temperature. The smart schedule will take full control."
+            )
+        return
+
+    # 2. 'off' validation
+    if operation_mode == "off":
+        # Block temperature for off, but ignore duration/overlay
+        if temperature is not None:
+            raise ServiceValidationError(
+                f"When setting {'water heater' if is_water_heater else 'mode'} to 'off', "
+                "you cannot provide a target temperature."
+            )
+        return
+
+    # 3. 'heat' validation
+    # No mandatory temperature check here because the coordinator handles fallbacks.
+    return
 
 
 async def async_setup_services(
@@ -131,14 +169,56 @@ async def async_setup_services(
         entity_id = call.data.get("entity_id")
         if not entity_id:
             return
-
         zone_id = coordinator.get_zone_id_from_entity(entity_id)
-        if not zone_id:
+        if zone_id is None:
             _LOGGER.warning("Could not resolve Tado zone for entity %s", entity_id)
             return
 
         params = _parse_service_call_data(call)
-        await _execute_set_mode(coordinator, [zone_id], params, ZONE_TYPE_HOT_WATER)
+        operation_mode = params["operation_mode"]
+        temperature = params["temperature"]
+        duration = params["duration"]
+        overlay_mode = params["overlay"]
+        refresh_after = params["refresh_after"]
+
+        # Validate parameters (DRY)
+        _validate_service_params(
+            operation_mode, temperature, duration, overlay_mode, is_water_heater=True
+        )
+
+        if operation_mode == "auto":
+            await coordinator.async_set_hot_water_auto(
+                zone_id, refresh_after=refresh_after, ignore_global_config=True
+            )
+            return
+
+        if operation_mode == "off":
+            await coordinator.async_set_hot_water_off(
+                zone_id, refresh_after=refresh_after
+            )
+            return
+
+        if operation_mode == "heat":
+            # Round to integer for hot water (Tado requirement) - validation is now in coordinator
+            final_temp = round(float(temperature)) if temperature is not None else None
+
+            # Use overlay helper which supports duration/timer
+            await coordinator.async_set_zone_overlay(
+                zone_id=zone_id,
+                power=POWER_ON,
+                temperature=final_temp,
+                duration=duration,
+                overlay_type=ZONE_TYPE_HOT_WATER,
+                overlay_mode=overlay_mode,
+                refresh_after=refresh_after,
+            )
+            return
+
+        _LOGGER.warning(
+            "Unsupported operation_mode '%s' for water heater entity %s",
+            operation_mode,
+            entity_id,
+        )
 
     hass.services.async_register(DOMAIN, SERVICE_MANUAL_POLL, handle_manual_poll)
     hass.services.async_register(
@@ -163,22 +243,24 @@ async def _execute_set_mode(
 ) -> None:
     """Execute set_mode logic via coordinator's overlay function."""
     operation_mode = params["operation_mode"]
-
-    # Special case: 'auto' means resume schedule for all target zones
-    if operation_mode == "auto":
-        for zone_id in zone_ids:
-            await coordinator.async_set_zone_auto(zone_id)
-        return
-
-    power = params["power"]
+    refresh_after = params.get("refresh_after", False)
     temperature = params["temperature"]
     duration = params["duration"]
     overlay_mode = params["overlay"]
 
-    if operation_mode == POWER_OFF:
-        power = POWER_OFF
-    elif operation_mode == "heat":
-        power = POWER_ON
+    # Validate parameters (DRY)
+    _validate_service_params(operation_mode, temperature, duration, overlay_mode)
+
+    # Special case: 'auto' means resume schedule for all target zones
+    if operation_mode == "auto":
+        for zone_id in zone_ids:
+            await coordinator.async_set_zone_auto(
+                zone_id, refresh_after=refresh_after, ignore_global_config=True
+            )
+        return
+
+    # Derive power from mode
+    power = POWER_OFF if operation_mode == "off" else POWER_ON
 
     # Fallback to manual overlay if no duration or mode is given
     if not overlay_mode and not duration:
@@ -191,6 +273,7 @@ async def _execute_set_mode(
         duration=duration,
         overlay_mode=overlay_mode,
         overlay_type=overlay_type,
+        refresh_after=refresh_after,
     )
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.water_heater import (
     WaterHeaterEntity,
@@ -10,13 +10,16 @@ from homeassistant.components.water_heater import (
 )
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
     TEMP_MAX_HOT_WATER,
     TEMP_MIN_HOT_WATER,
     TEMP_STEP_HOT_WATER,
+    ZONE_TYPE_HOT_WATER,
 )
-from .entity import TadoHotWaterZoneEntity
+from .entity import TadoHotWaterZoneEntity, TadoOptimisticMixin
+from .helpers.discovery import yield_zones
 from .helpers.logging_utils import get_redacted_logger
 
 if TYPE_CHECKING:
@@ -40,21 +43,18 @@ async def async_setup_entry(
 ) -> None:
     """Set up Tado hot water based on a config entry."""
     coordinator: TadoDataUpdateCoordinator = entry.runtime_data
-    entities: list[WaterHeaterEntity] = []
-
-    # Find HOT_WATER zones
-    for zone in coordinator.zones_meta.values():
-        if zone.type == "HOT_WATER":
-            _LOGGER.info("Found hot water zone: %s (ID: %d)", zone.name, zone.id)
-            entities.append(TadoHotWater(coordinator, zone.id, zone.name))
-
-    if entities:
+    if entities := [
+        TadoHotWater(coordinator, zone.id, zone.name)
+        for zone in yield_zones(coordinator, {ZONE_TYPE_HOT_WATER})
+    ]:
         async_add_entities(entities)
     else:
         _LOGGER.debug("No hot water zones found")
 
 
-class TadoHotWater(TadoHotWaterZoneEntity, WaterHeaterEntity):
+class TadoHotWater(
+    TadoHotWaterZoneEntity, TadoOptimisticMixin, WaterHeaterEntity, RestoreEntity
+):
     """Representation of a Tado hot water zone."""
 
     _attr_supported_features = (
@@ -66,20 +66,42 @@ class TadoHotWater(TadoHotWaterZoneEntity, WaterHeaterEntity):
     _attr_min_temp = TEMP_MIN_HOT_WATER
     _attr_max_temp = TEMP_MAX_HOT_WATER
     _attr_target_temperature_step = TEMP_STEP_HOT_WATER
+    _attr_optimistic_key = "operation_mode"
+    _attr_optimistic_scope = "zone"
 
-    _attr_name = None  # Use device name only, no entity suffix
+    _attr_name = None
 
     def __init__(
         self, coordinator: TadoDataUpdateCoordinator, zone_id: int, zone_name: str
     ) -> None:
         """Initialize Tado hot water."""
         super().__init__(coordinator, "hot_water", zone_id, zone_name)
-        self._attr_unique_id = f"{coordinator.config_entry.entry_id}_hw_{zone_id}"
-        self._attr_translation_key = cast(str, None)  # Don't add extra name suffix
+        self._attr_unique_id = (
+            f"{coordinator.config_entry.entry_id}_water_heater_{zone_id}"
+        )
+        self._last_target_temp: float | None = None
 
     async def async_added_to_hass(self) -> None:
-        """Update temperature limits from capabilities when added to hass."""
+        """Handle entity being added to Home Assistant."""
         await super().async_added_to_hass()
+
+        if not self.tado_coordinator.supports_temperature(self._zone_id):
+            self._attr_supported_features = WaterHeaterEntityFeature.OPERATION_MODE
+            self.async_write_ha_state()
+            return
+
+        # Restore last known temperature from HA state machine
+        if last_state := await self.async_get_last_state():
+            if "last_target_temperature" in last_state.attributes:
+                self._last_target_temp = float(
+                    last_state.attributes["last_target_temperature"]
+                )
+                _LOGGER.debug(
+                    "Hot Water Zone %d: Restored last_target_temp: %s",
+                    self._zone_id,
+                    self._last_target_temp,
+                )
+
         capabilities = await self.tado_coordinator.async_get_capabilities(self._zone_id)
         if capabilities and capabilities.temperatures:
             self._attr_min_temp = float(capabilities.temperatures.celsius.min)
@@ -91,16 +113,20 @@ class TadoHotWater(TadoHotWaterZoneEntity, WaterHeaterEntity):
             self.async_write_ha_state()
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return entity specific state attributes."""
+        return {
+            "last_target_temperature": self._last_target_temp,
+        }
+
+    @property
     def current_operation(self) -> str:
         """Return current operation mode."""
-        # Check optimistic state first
-        optimistic_mode = self.tado_coordinator.optimistic.get_zone_operation_mode(
-            self._zone_id
-        )
-        if optimistic_mode is not None:
-            return optimistic_mode
+        return str(self._resolve_state())
 
-        state = self.tado_coordinator.data.zone_states.get(str(self._zone_id))
+    def _get_actual_value(self) -> str:
+        """Return actual operation mode from coordinator data."""
+        state = self.coordinator.data.zone_states.get(str(self._zone_id))
         if state is None:
             return OPERATION_MODE_AUTO
 
@@ -120,16 +146,19 @@ class TadoHotWater(TadoHotWaterZoneEntity, WaterHeaterEntity):
 
     @property
     def target_temperature(self) -> float | None:
-        """Return the target water temperature.
-
-        Returns None if:
-        - Hot water is off
-        - Zone state unavailable
-        - System doesn't support temperature control (no temp in state)
-        """
+        """Return the target water temperature."""
         if self.current_operation == OPERATION_MODE_OFF:
             return None
 
+        # 1. Check Optimistic Temperature
+        if (
+            opt_temp := self.tado_coordinator.optimistic.get_zone_temperature(
+                self._zone_id
+            )
+        ) is not None:
+            return float(opt_temp)
+
+        # 2. Real API State
         state = self.tado_coordinator.data.zone_states.get(str(self._zone_id))
         if state is None:
             return None
@@ -156,11 +185,17 @@ class TadoHotWater(TadoHotWaterZoneEntity, WaterHeaterEntity):
     async def async_set_operation_mode(self, operation_mode: str) -> None:
         """Set new operation mode."""
         if operation_mode == OPERATION_MODE_OFF:
+            if current := self.target_temperature:
+                self._last_target_temp = current
             await self.tado_coordinator.async_set_hot_water_off(self._zone_id)
         elif operation_mode == OPERATION_MODE_AUTO:
+            if current := self.target_temperature:
+                self._last_target_temp = current
             await self.tado_coordinator.async_set_hot_water_auto(self._zone_id)
         elif operation_mode == OPERATION_MODE_HEAT:
-            await self.tado_coordinator.async_set_hot_water_heat(self._zone_id)
+            await self.tado_coordinator.async_set_hot_water_heat(
+                self._zone_id, temperature=self._last_target_temp
+            )
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn hot water on (resume schedule)."""
@@ -176,8 +211,16 @@ class TadoHotWater(TadoHotWaterZoneEntity, WaterHeaterEntity):
         if temperature is None:
             return
 
+        if not self.tado_coordinator.supports_temperature(self._zone_id):
+            _LOGGER.warning(
+                "Hot water zone %d does not support temperature control",
+                self._zone_id,
+            )
+            return
+
         # Round to integer for hot water (Tado requirement)
         rounded_temp = round(float(temperature))
+        self._last_target_temp = float(rounded_temp)
 
         await self.tado_coordinator.async_set_zone_overlay(
             self._zone_id,
