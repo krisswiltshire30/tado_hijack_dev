@@ -1,3 +1,31 @@
+## [4.0.0-dev.12](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.11...v4.0.0-dev.12) (2026-01-30)
+
+### ✨ New Features
+
+* feat(core): implement robust AC/HW logic hardening, state persistence and decoupled dummy simulation environment
+
+This major update consolidates architectural stability improvements, critical API error prevention and a dedicated developer simulation subsystem to harden the integration for production release.
+
+API Stability & Validation:
+- Pre-API Payload Validation: Introduced TadoOverlayValidator to intercept malformed payloads before they reach the Tado cloud. Prevents 422 (Unprocessable Entity) errors and preserves API quota by ensuring required fields (mode, temperature) are present based on zone type.
+- AC Mode Integrity: Resolved a systemic bug where physical AC modes were lost in API payloads. The integration now explicitly propagates the active mode (COOL, HEAT, DRY, FAN) during all setting adjustments.
+- Enhanced Diagnostics: Upgraded failure reporting to include full redacted payload details and exception metadata, enabling rapid forensic analysis of rejected commands.
+
+State Architecture & Concurrency:
+- Centralized Persistence: Introduced TadoStateMemoryMixin leveraging HA's RestoreEntity. Migrated Climate and Water Heater entities to this unified handler to ensure target temperatures and settings are reliably restored across restarts.
+- Dynamic Field Protection: Implemented a selective state-merging mechanism in TadoDataManager. Key fields (setting, overlay_active, presence) are now locked while corresponding commands are in-flight, preventing incoming polls from reverting pending UI changes.
+- Optimistic UI Expansion: Added real-time tracking for swing modes and fan levels, providing instantaneous feedback and eliminating UI 'flickering' during API latency.
+
+Water Heater & UX Refinement:
+- Hot Water Hardening: Enforced integer temperature steps (min 1.0°C) and dynamically hid the target temperature slider in AUTO mode to align with API constraints.
+- Mode Transition Stability: Resolved 422 errors during AUTO-to-HEAT transitions by simplifying the temperature resolution fallback chain.
+
+Developer Tooling (Dummy Environment):
+- Decoupled Architecture: Introduced TadoDummyHandler to encapsulate all mock logic for test zones (998, 999), keeping the core production codebase pure.
+- Standardized Traceability: Integrated developer hooks using the '# [DUMMY_HOOK]' tag for 100% transparency.
+- Environment-Controlled Activation: Replaced UI toggles with a secure 'TADO_ENABLE_DUMMIES=true' variable, ensuring the simulation environment remains inactive in production by default.
+- Stateful Mocking: Implemented full API interception for capabilities, metadata, and state injection, allowing for comprehensive hardware-free testing.
+
 ## [4.0.0-dev.11](https://github.com/banter240/tado_hijack/compare/v4.0.0-dev.10...v4.0.0-dev.11) (2026-01-29)
 
 ### 🐛 Bug Fixes
