@@ -51,8 +51,22 @@ def build_overlay_data(
     overlay_type: str | None = None,
     overlay_mode: str | None = None,
     ac_mode: str | None = None,
+    supports_temp: bool = True,
 ) -> dict[str, Any]:
-    """Build the overlay data dictionary for Tado API."""
+    """Build the overlay data dictionary for Tado API.
+
+    Args:
+        zone_id: Zone ID
+        zones_meta: Zone metadata dict
+        power: Power state (ON/OFF)
+        temperature: Target temperature (optional)
+        duration: Duration in minutes (optional)
+        overlay_type: Zone type override (optional)
+        overlay_mode: Overlay mode (manual/next_block/presence)
+        ac_mode: AC mode for AIR_CONDITIONING zones (optional)
+        supports_temp: Whether zone supports temperature (for HOT_WATER OpenTherm detection)
+
+    """
     if not overlay_type:
         zone = zones_meta.get(zone_id)
         overlay_type = (
@@ -76,14 +90,20 @@ def build_overlay_data(
     if ac_mode:
         setting["mode"] = ac_mode
 
-    if temperature is not None and power == POWER_ON:
+    # Add temperature if supported and provided
+    # Hot Water without OpenTherm does NOT support temperature in overlays
+    if (
+        temperature is not None
+        and power == POWER_ON
+        and (overlay_type != ZONE_TYPE_HOT_WATER or supports_temp)
+    ):
         capped_temp = get_capped_temperature(zone_id, temperature, zones_meta)
         setting["temperature"] = {"celsius": capped_temp}
 
     payload = {"setting": setting, "termination": termination}
 
     # Validate payload before returning (saves API quota on invalid requests)
-    is_valid, error = validate_overlay_payload(payload, overlay_type)
+    is_valid, error = validate_overlay_payload(payload, overlay_type, supports_temp)
     if not is_valid:
         _LOGGER.error(
             "Overlay validation failed for zone %d (type=%s): %s",

@@ -594,7 +594,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         }
 
         # Validate payload before queuing
-        is_valid, error = validate_overlay_payload(data, overlay_type)
+        is_valid, error = validate_overlay_payload(
+            data, overlay_type, self.supports_temperature(zone_id)
+        )
         if not is_valid:
             _LOGGER.error("Zone heat validation failed for zone %d: %s", zone_id, error)
             raise ValueError(f"Invalid zone heat payload: {error}")
@@ -647,7 +649,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         }
 
         # Validate payload before queuing
-        is_valid, error = validate_overlay_payload(data, "HOT_WATER")
+        is_valid, error = validate_overlay_payload(
+            data, "HOT_WATER", self.supports_temperature(zone_id)
+        )
         if not is_valid:
             _LOGGER.error(
                 "Hot water off validation failed for zone %d: %s", zone_id, error
@@ -688,11 +692,15 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         ):
             temp = state.setting.temperature.celsius
 
+        # Hot Water with OpenTherm supports temperature, non-OpenTherm does not
         setting: dict[str, Any] = {
             "type": "HOT_WATER",
             "power": "ON",
-            "temperature": {"celsius": float(temp)},
         }
+
+        # Only include temperature if the zone supports it (OpenTherm)
+        if self.supports_temperature(zone_id):
+            setting["temperature"] = {"celsius": float(temp)}
 
         data = {
             "setting": setting,
@@ -700,7 +708,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         }
 
         # Validate payload before queuing (catch 422 errors early)
-        is_valid, error = validate_overlay_payload(data, "HOT_WATER")
+        is_valid, error = validate_overlay_payload(
+            data, "HOT_WATER", self.supports_temperature(zone_id)
+        )
         if not is_valid:
             _LOGGER.error(
                 "Hot water overlay validation failed for zone %d: %s", zone_id, error
@@ -1039,7 +1049,9 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
         }
 
         # Validate payload before queuing
-        is_valid, error = validate_overlay_payload(data, state.setting.type)
+        is_valid, error = validate_overlay_payload(
+            data, state.setting.type, self.supports_temperature(zone_id)
+        )
         if not is_valid:
             _LOGGER.error(
                 "AC setting validation failed for zone %d (%s): %s | Payload: %s",
@@ -1169,6 +1181,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
             overlay_type=overlay_type,
             overlay_mode=overlay_mode,
             ac_mode=ac_mode,
+            supports_temp=self.supports_temperature(zone_id),
         )
 
         old_state = patch_zone_overlay(self.data.zone_states.get(str(zone_id)), data)
@@ -1237,6 +1250,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                 overlay_mode=overlay_mode,
                 overlay_type=overlay_type,
                 ac_mode=ac_mode,
+                supports_temp=self.supports_temperature(zone_id),
             )
 
             old_state = patch_zone_overlay(
@@ -1329,6 +1343,7 @@ class TadoDataUpdateCoordinator(DataUpdateCoordinator[TadoData]):
                 power=setting.get("power", POWER_ON),
                 temperature=setting.get("temperature", {}).get("celsius"),
                 overlay_type=setting.get("type"),
+                supports_temp=self.supports_temperature(zone_id),
             )
 
             old_state = patch_zone_overlay(

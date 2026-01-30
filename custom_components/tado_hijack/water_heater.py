@@ -141,6 +141,10 @@ class TadoHotWater(
     @property
     def target_temperature(self) -> float | None:
         """Return the target water temperature (only in manual mode)."""
+        # Non-OpenTherm systems don't support temperature control
+        if not self.tado_coordinator.supports_temperature(self._zone_id):
+            return None
+
         if self.current_operation in (OPERATION_MODE_OFF, OPERATION_MODE_AUTO):
             return None
 
@@ -164,8 +168,11 @@ class TadoHotWater(
         """Return entity specific state attributes."""
         attrs = super().extra_state_attributes
 
-        # Recovery of the target temperature of the planning in AUTO mode
-        if self.current_operation == OPERATION_MODE_AUTO:
+        # Only show schedule temperature for OpenTherm systems
+        if (
+            self.tado_coordinator.supports_temperature(self._zone_id)
+            and self.current_operation == OPERATION_MODE_AUTO
+        ):
             state = self.coordinator.data.zone_states.get(str(self._zone_id))
             if (temp := parse_schedule_temperature(state)) is not None:
                 attrs["auto_target_temperature"] = int(temp)
@@ -211,6 +218,14 @@ class TadoHotWater(
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
+        # Non-OpenTherm systems don't support temperature control
+        if not self.tado_coordinator.supports_temperature(self._zone_id):
+            _LOGGER.warning(
+                "Hot water zone %d does not support temperature control (non-OpenTherm system)",
+                self._zone_id,
+            )
+            return
+
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
