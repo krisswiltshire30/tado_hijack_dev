@@ -5,7 +5,14 @@
   entropy = 3.5
 
     [[rules.allowlists]]
-      description = "Allow internal variable _ping_unsub which is not an API key"
+      description = "Allow internal variables and placeholders"
       regexes = [
-          '_ping_unsub'
+          '_ping_unsub',
+          'presence_poll_interval',
+          'reduced_polling',
+          'REDUCED_POLLING',
+          'REDACTED'
+      ]
+      paths = [
+          'custom_components/tado_hijack/translations/.*'
       ]
