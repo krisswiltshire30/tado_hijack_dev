@@ -1,3 +1,16 @@
+## [4.0.1-dev.1](https://github.com/banter240/tado_hijack/compare/v4.0.0...v4.0.1-dev.1) (2026-01-30)
+
+### 🐛 Bug Fixes
+
+* fix(hot-water): support dynamic temperature control based on OpenTherm detection
+
+This change implements a more robust handling of hot water systems by detecting whether the underlying hardware supports OpenTherm temperature control.
+
+Key improvements:
+- Automatically hides the temperature control UI in Home Assistant for non-OpenTherm (on/off) systems.
+- Enables precise temperature selection for supported OpenTherm configurations.
+- Updates overlay validation logic to prevent invalid temperature requests on hardware that doesn't support it.
+
 ## [4.0.0](https://github.com/banter240/tado_hijack/compare/v3.0.0...v4.0.0) (2026-01-30)
 
 ### ⚠ BREAKING CHANGES
