@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import datetime
 from typing import Any
 
 
@@ -13,6 +14,7 @@ from .tado_request_handler import TadoRequestHandler
 _LOGGER = get_redacted_logger(__name__)
 
 _HANDLER = TadoRequestHandler()
+_PATCHES_APPLIED = False
 
 
 def get_handler() -> TadoRequestHandler:
@@ -21,24 +23,50 @@ def get_handler() -> TadoRequestHandler:
 
 
 def apply_patch() -> None:
-    """Apply global library patches."""
+    """Apply global library patches (idempotent - safe to call multiple times)."""
+    global _PATCHES_APPLIED
+    if _PATCHES_APPLIED:
+        return
 
-    _LOGGER.debug("Applying tadoasync patches")
+    try:
+        import tadoasync
+
+        tadoasync_version = getattr(tadoasync, "__version__", "unknown")
+        _LOGGER.debug(
+            "Applying tadoasync patches (tadoasync version: %s)", tadoasync_version
+        )
+    except ImportError:
+        _LOGGER.warning("Failed to import tadoasync, skipping patches")
+        return
 
     _patch_version()
-
     _patch_zone_state()
+    _PATCHES_APPLIED = True
 
 
 def _patch_version() -> None:
+    """Patch tadoasync VERSION string for User-Agent compatibility."""
     try:
         import tadoasync.tadoasync
 
+        # Check if VERSION attribute exists before patching
+        if not hasattr(tadoasync.tadoasync, "VERSION"):
+            _LOGGER.warning(
+                "tadoasync.tadoasync.VERSION not found - library structure may have changed"
+            )
+            return
+
         tadoasync.tadoasync.VERSION = TADO_VERSION_PATCH
+        _LOGGER.debug(
+            "Successfully patched tadoasync.tadoasync.VERSION to %s", TADO_VERSION_PATCH
+        )
+
         if "tadoasync" in sys.modules:
             setattr(sys.modules["tadoasync"], "VERSION", TADO_VERSION_PATCH)
     except ImportError as e:
-        _LOGGER.error("Failed to patch tadoasync version: %s", e)
+        _LOGGER.warning("Failed to import tadoasync for version patch: %s", e)
+    except Exception as e:
+        _LOGGER.error("Unexpected error patching tadoasync version: %s", e)
 
 
 def _patch_zone_state() -> None:
@@ -46,11 +74,35 @@ def _patch_zone_state() -> None:
     try:
         import tadoasync.models
 
+        # Check if ZoneState exists
+        if not hasattr(tadoasync.models, "ZoneState"):
+            _LOGGER.warning(
+                "tadoasync.models.ZoneState not found - library structure may have changed"
+            )
+            return
+
         def robust_pre_deserialize(cls: Any, d: dict[str, Any]) -> dict[str, Any]:
             if not d.get("sensorDataPoints"):
                 d["sensorDataPoints"] = None
             if d.get("nextTimeBlock") is None:
                 d["nextTimeBlock"] = {}
+
+            # Rescue Hot Water Activity before it gets dropped by the strict dataclass
+            # We map it to a field that we can later access in sensor.py
+            if activity := d.get("activityDataPoints"):
+                if (
+                    "hotWaterInUse" in activity
+                    and isinstance(activity["hotWaterInUse"], dict)
+                    and "value" in activity["hotWaterInUse"]
+                ):
+                    hw_val = activity["hotWaterInUse"]["value"]
+                    # Inject into a safe place for our hijacked parser
+                    activity["heatingPower"] = {
+                        "type": "HOT_WATER_POWER",
+                        "percentage": 100.0 if hw_val == "ON" else 0.0,
+                        "timestamp": datetime.now().isoformat(),
+                        "value": hw_val,
+                    }
             return d
 
         setattr(
@@ -58,5 +110,10 @@ def _patch_zone_state() -> None:
             "__pre_deserialize__",
             classmethod(robust_pre_deserialize),
         )
-    except (ImportError, AttributeError) as e:
-        _LOGGER.error("Failed to patch ZoneState model: %s", e)
+        _LOGGER.debug("Successfully patched ZoneState.__pre_deserialize__")
+    except ImportError as e:
+        _LOGGER.warning("Failed to import tadoasync.models for ZoneState patch: %s", e)
+    except AttributeError as e:
+        _LOGGER.warning("ZoneState attribute not found, patch may not be needed: %s", e)
+    except Exception as e:
+        _LOGGER.error("Unexpected error patching ZoneState model: %s", e)

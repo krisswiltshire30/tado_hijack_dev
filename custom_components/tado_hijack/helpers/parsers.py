@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..models import RateLimit
+
+if TYPE_CHECKING:
+    from tadoasync.models import Capabilities
 
 
 def parse_ratelimit_headers(headers: dict[str, Any]) -> RateLimit | None:
@@ -31,4 +34,68 @@ def parse_ratelimit_headers(headers: dict[str, Any]) -> RateLimit | None:
     except (ValueError, TypeError, AttributeError):
         pass
 
+    return None
+
+
+def get_ac_capabilities(capabilities: Capabilities) -> dict[str, set[str]]:
+    """Extract all available AC options across all supported modes."""
+    fan_speeds: set[str] = set()
+    v_swings: set[str] = set()
+    h_swings: set[str] = set()
+
+    for mode_attr in ("auto", "cool", "dry", "fan", "heat"):
+        if ac_mode := getattr(capabilities, mode_attr, None):
+            if ac_mode.fan_speeds:
+                fan_speeds.update(ac_mode.fan_speeds)
+            if ac_mode.fan_level:
+                fan_speeds.update(ac_mode.fan_level)
+            if ac_mode.vertical_swing:
+                v_swings.update(ac_mode.vertical_swing)
+            if ac_mode.swing:
+                v_swings.update(ac_mode.swing)
+            if ac_mode.horizontal_swing:
+                h_swings.update(ac_mode.horizontal_swing)
+
+    return {
+        "fan_speeds": fan_speeds,
+        "vertical_swing": v_swings,
+        "horizontal_swings": h_swings,
+    }
+
+
+def parse_heating_power(state: Any, zone_type: str | None = None) -> float:
+    """Extract heating power percentage from zone state.
+
+    Hot Water Power: ON -> 100%, OFF -> 0% (Dev.2 Logic)
+    Regular Heating: Percentage from activityDataPoints
+    """
+    if not state:
+        return 0.0
+
+    # Handle Hot Water (Dev.2 Logic)
+    if zone_type == "HOT_WATER":
+        if setting := getattr(state, "setting", None):
+            return 100.0 if getattr(setting, "power", "OFF") == "ON" else 0.0
+        return 0.0
+
+    # Regular Heating Power (%)
+    if not getattr(state, "activity_data_points", None):
+        return 0.0
+
+    if (
+        hasattr(state.activity_data_points, "heating_power")
+        and state.activity_data_points.heating_power
+    ):
+        return float(state.activity_data_points.heating_power.percentage)
+
+    return 0.0
+
+
+def parse_schedule_temperature(state: Any) -> float | None:
+    """Extract the target temperature from the active schedule in zone state."""
+    if not state or not (setting := getattr(state, "setting", None)):
+        return None
+    if temp := getattr(setting, "temperature", None):
+        celsius = getattr(temp, "celsius", None)
+        return float(celsius) if celsius is not None else None
     return None

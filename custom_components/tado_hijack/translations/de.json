@@ -1,4 +1,164 @@
 {
+  "entity": {
+    "sensor": {
+      "api_limit": {
+        "name": "API Tageslimit"
+      },
+      "api_remaining": {
+        "name": "Verbleibende API-Aufrufe"
+      },
+      "api_status": {
+        "name": "API Status",
+        "state": {
+          "connected": "Verbunden",
+          "throttled": "Gedrosselt",
+          "rate_limited": "Limit erreicht"
+        }
+      },
+      "heating_power": {
+        "name": "Heizleistung"
+      },
+      "hot_water_power": {
+        "name": "Leistung"
+      },
+      "humidity": {
+        "name": "Luftfeuchtigkeit"
+      }
+    },
+    "binary_sensor": {
+      "battery_state": {
+        "name": "Batterie"
+      },
+      "link_state": {
+        "name": "Verbindung"
+      },
+      "connection_state": {
+        "name": "Cloud-Verbindung"
+      },
+      "bridge_connection": {
+        "name": "Bridge Cloud-Verbindung"
+      },
+      "overlay": {
+        "name": "Overlay"
+      },
+      "power": {
+        "name": "Power"
+      },
+      "connectivity": {
+        "name": "Verbindung"
+      }
+    },
+    "switch": {
+      "away_mode": {
+        "name": "Away Modus"
+      },
+      "polling_active": {
+        "name": "Globales Polling"
+      },
+      "reduced_polling_logic": {
+        "name": "Reduzierte Polling-Logik"
+      },
+      "schedule": {
+        "name": "Zeitplan"
+      },
+      "child_lock": {
+        "name": "Kindersicherung"
+      },
+      "hot_water": {
+        "name": "Warmwasser"
+      },
+      "dazzle_mode": {
+        "name": "Dazzle Modus"
+      },
+      "early_start": {
+        "name": "Vorzeitiges Aufheizen"
+      },
+      "open_window": {
+        "name": "Fenster-Offen-Erkennung"
+      }
+    },
+    "button": {
+      "full_manual_poll": {
+        "name": "Vollständiger Abruf"
+      },
+      "refresh_metadata": {
+        "name": "Zonen/Geräte aktualisieren"
+      },
+      "refresh_offsets": {
+        "name": "Offsets aktualisieren"
+      },
+      "refresh_away": {
+        "name": "Away-Temperaturen aktualisieren"
+      },
+      "refresh_presence": {
+        "name": "Anwesenheit aktualisieren"
+      },
+      "resume_all_schedules": {
+        "name": "Alle Zeitpläne fortsetzen"
+      },
+      "turn_off_all_zones": {
+        "name": "Alle Zonen ausschalten"
+      },
+      "boost_all_zones": {
+        "name": "Alle Zonen aufheizen"
+      },
+      "resume_schedule": {
+        "name": "Zeitplan fortsetzen"
+      }
+    },
+    "number": {
+      "temperature_offset": {
+        "name": "Temperatur-Offset"
+      },
+      "away_temperature": {
+        "name": "Away-Temperatur"
+      },
+      "target_temperature": {
+        "name": "Soll-Temperatur"
+      }
+    },
+    "select": {
+      "fan_speed": {
+        "name": "Lüftergeschwindigkeit",
+        "state": {
+          "auto": "Automatisch",
+          "low": "Niedrig",
+          "middle": "Mittel",
+          "high": "Hoch"
+        }
+      },
+      "vertical_swing": {
+        "name": "Vertikaler Swing",
+        "state": {
+          "on": "An",
+          "off": "Aus",
+          "auto": "Automatisch"
+        }
+      },
+      "horizontal_swing": {
+        "name": "Horizontaler Swing",
+        "state": {
+          "on": "An",
+          "off": "Aus",
+          "auto": "Automatisch"
+        }
+      }
+    },
+    "climate": {
+      "hot_water": {
+        "name": "Warmwasser",
+        "state_attributes": {
+          "hvac_mode": {
+            "state": {
+              "auto": "Zeitplan",
+              "heat": "Manuell",
+              "off": "Aus"
+            }
+          }
+        }
+      }
+    }
+  },
   "config": {
     "progress": {
       "wait_for_device": "Um die Bridge zu autorisieren, besuche diese URL: {url}\nUnd gib diesen Code ein: {code}\nSobald dies erledigt ist, aktualisiert sich dieses Fenster automatisch."
@@ -24,24 +184,70 @@
         "title": "Zeitüberschreitung bei der Aktivierung",
         "description": "Die Authentifizierung ist abgelaufen. Dies passiert häufig, wenn das Tado API-Limit erschöpft ist. Das Limit wird täglich um 12:00 Uhr MEZ zurückgesetzt. Klicke auf ABSENDEN, um es erneut zu versuchen."
       },
-      "config": {
-        "title": "Tado Hijack Konfiguration",
-        "description": "Wähle die Intervalle für die Datenaktualisierung und Drosselungseinstellungen.",
+      "init": {
+        "title": "Hintergrund-Polling",
+        "description": "Konfigurieren Sie die Intervalle für die Hintergrundabfragen.\n[Dokumentation: API-Verbrauch]({docs_url})",
         "data": {
-          "scan_interval": "Intervall für Schnelles Polling (Sekunden)",
-          "slow_poll_interval": "Intervall für Batterie-Update (Stunden)",
-          "offset_poll_interval": "Intervall für Offset-Update (Stunden)",
-          "throttle_threshold": "Drosselungsschwelle",
-          "disable_polling_when_throttled": "Polling bei Drosselung deaktivieren",
-          "debounce_time": "Debounce Zeit (Sekunden)"
+          "scan_interval": "Status Polling Intervall (Sekunden)",
+          "presence_poll_interval": "Anwesenheits Polling Intervall (Sekunden)",
+          "slow_poll_interval": "Hardware-Sync Intervall (Sekunden)",
+          "offset_poll_interval": "Offset Update Intervall (Sekunden)"
         },
         "data_description": {
-          "scan_interval": "Wie oft Anwesenheit und Heizstatus geprüft werden. Auf 0 setzen um periodisches Polling zu deaktivieren (nur manuell). 1800s (30m) wird empfohlen.",
-          "slow_poll_interval": "Wie oft Batterien und Gerätedaten geprüft werden. 24h wird dringend empfohlen. Kostet nur 2 API-Aufrufe insgesamt.",
-          "offset_poll_interval": "Wie oft Temperatur-Offsets abgerufen werden. Kostet 1 API-Aufruf PRO VENTIL. Auf 0 setzen um zu deaktivieren (nur manuell).",
-          "throttle_threshold": "Bestätigungs-API-Aufrufe überspringen wenn Restkontingent unter diesen Wert fällt. 0 = deaktiviert.",
-          "disable_polling_when_throttled": "Periodisches Polling komplett stoppen wenn im Drosselungsmodus.",
-          "debounce_time": "Zeitfenster um schnelle Änderungen zu sammeln bevor sie gesendet werden. Standard 5s."
+          "scan_interval": "Intervall für Raumdaten (Temp, Feuchtigkeit, Heizleistung). WICHTIG: Wird bei aktiver 'Auto API Quota' dynamisch überschrieben und dient dann nur als Fallback bei Erschöpfung des berechneten Auto-Quota-Budgets.",
+          "presence_poll_interval": "Wie oft der Home/Away Status geprüft wird. Ein hoher Wert (z.B. 43200s/12h) spart API-Quota, falls HA-Anwesenheit genutzt wird.",
+          "slow_poll_interval": "Wie oft Batterien, Firmware, Fähigkeiten und die Geräteliste geprüft werden. 86400s (24h) wird dringend empfohlen.",
+          "offset_poll_interval": "Wie oft Temperatur-Offsets abgerufen werden. Kostet 1 API-Aufruf PRO VENTIL. 0 = deaktiviert."
+        }
+      },
+      "quota": {
+        "title": "API Quota & Sicherheit",
+        "description": "Konfigurieren Sie das automatische API-Management.\n[Dokumentation: Auto API Quota]({docs_url})",
+        "data": {
+          "auto_api_quota_percent": "Auto-API-Kontingent (%)",
+          "throttle_threshold": "Drossel-Schwellenwert (Sicherheits-Puffer)",
+          "disable_polling_when_throttled": "Polling deaktivieren wenn gedrosselt",
+          "refresh_after_resume": "Status nach Schedule-Resume aktualisieren"
+        },
+        "data_description": {
+          "auto_api_quota_percent": "Nutze X% der FREIEN Tagesquota für Status-Polling (0 = deaktiviert). FREI = Limit - Hintergrund-Reserve (Syncs) - Externe-Aktivität (Automationen, App-Nutzung über dem Puffer). Hybrid-Strategie: Nutzt MAX(Tagesbudget - Verbraucht, Verbleibend * X%) → System pollt IMMER weiter, auch wenn Tagesbudget überschritten.",
+          "throttle_threshold": "Reserviert N Aufrufe für ALLES außerhalb des Hijack-Hintergrund-Pollings (Automationen, Skripte, manuelle App-Nutzung). Das Polling stoppt bei Erreichen dieser Schwelle, um deren Funktion zu sichern. Empfohlen: 20. 0 = deaktiviert.",
+          "disable_polling_when_throttled": "Stoppt das periodische Polling vollständig, wenn das verbleibende Kontingent den Puffer erreicht.",
+          "refresh_after_resume": "Automatisch Zieltemperatur/State abrufen nach Resume Schedule (HVAC AUTO). Notwendig, da Zeitpläne Tado-Cloud-seitig verwaltet werden. Nutzt 1s Grace-Period um mehrere Resumes zu mergen. Kostet 1 API-Aufruf."
+        }
+      },
+      "schedule": {
+        "title": "Reduziertes Polling",
+        "description": "Konfigurieren Sie das Profil für reduziertes Polling (z.B. Nachtmodus).\n[Dokumentation: Sparfenster]({docs_url})",
+        "data": {
+          "reduced_polling_active": "Reduziertes Polling aktiv",
+          "reduced_polling_start": "Startzeit des Fensters",
+          "reduced_polling_end": "Endzeit des Fensters",
+          "reduced_polling_interval": "Intervall im Sparfenster (Sekunden)"
+        },
+        "data_description": {
+          "reduced_polling_active": "Aktiviert das zeitbasierte, gewichtete Polling-Profil.",
+          "reduced_polling_start": "Zeitpunkt, an dem das Sparfenster beginnt (z. B. 22:00).",
+          "reduced_polling_end": "Zeitpunkt, an dem das Sparfenster endet (z. B. 07:00).",
+          "reduced_polling_interval": "Polling-Intervall während des Sparfensters (z.B. 3600s = 1h). Auf 0 setzen für Pause."
+        }
+      },
+      "advanced": {
+        "title": "Erweitert & Debug",
+        "description": "Erweiterte Einstellungen und [tado-api-proxy Repository]({proxy_repo_url}).\n[Dokumentation: API Proxy Umgehung]({docs_url})",
+        "data": {
+          "api_proxy_url": "API-Proxy-URL (Optional)",
+          "debounce_time": "Debounce-Zeit (Sekunden)",
+          "call_jitter_enabled": "Call-Jitter aktivieren (Proxy)",
+          "jitter_percent": "Jitter-Stärke (+/- %)",
+          "debug_logging": "Debug-Logging aktivieren"
+        },
+        "data_description": {
+          "api_proxy_url": "Fortgeschritten: Basis-URL einer lokalen tado-api-proxy Instanz (z.B. http://192.168.1.5:8080). NICHT /api/v2 anhängen. Proxy handled Authentifizierung intern. Repo: https://github.com/s1adem4n/tado-api-proxy",
+          "debounce_time": "Zeitfenster um schnelle Änderungen zu sammeln bevor sie gesendet werden. Standard 5s.",
+          "call_jitter_enabled": "Fügt zufällige Verzögerungen vor API-Aufrufen ein, um Automations-Muster zu verschleiern. Nur bei Proxy-Nutzung wirksam.",
+          "jitter_percent": "Stärke der zufälligen Abweichung für Polls und Calls. Standard 10% (z.B. 60s -> 54-66s).",
+          "debug_logging": "Ausführliches Debug-Logging für die Fehlersuche aktivieren. WARNUNG: Erzeugt große Logdateien."
         }
       }
     },
@@ -55,72 +261,70 @@
   "options": {
     "step": {
       "init": {
-        "title": "Tado Hijack Optionen",
+        "title": "Hintergrund-Polling",
+        "description": "Konfigurieren Sie die Intervalle für die Hintergrundabfragen.\n[Dokumentation: API-Verbrauch]({docs_url})",
         "data": {
-          "scan_interval": "Aktualisierungsintervall (Sekunden)",
-          "slow_poll_interval": "Intervall für Batterie-Update (Stunden)",
-          "offset_poll_interval": "Intervall für Offset-Update (Stunden)",
-          "throttle_threshold": "Drosselungsschwelle",
-          "disable_polling_when_throttled": "Polling bei Drosselung deaktivieren"
+          "scan_interval": "Status Polling Intervall (Sekunden)",
+          "presence_poll_interval": "Anwesenheits Polling Intervall (Sekunden)",
+          "slow_poll_interval": "Hardware-Sync Intervall (Sekunden)",
+          "offset_poll_interval": "Offset Update Intervall (Sekunden)"
         },
         "data_description": {
-          "scan_interval": "Intervall für Anwesenheit und Heizstatus. Auf 0 setzen um periodisches Polling zu deaktivieren.",
-          "slow_poll_interval": "Intervall für Batterien und Metadaten. 24h ist meist völlig ausreichend.",
-          "offset_poll_interval": "Intervall für Temperatur-Offsets. Kostet 1 API-Aufruf PRO VENTIL. 0 = deaktiviert.",
-          "throttle_threshold": "Bestätigungs-API-Aufrufe überspringen wenn Restkontingent unter diesen Wert fällt. 0 = deaktiviert.",
-          "disable_polling_when_throttled": "Periodisches Polling stoppen wenn gedrosselt."
+          "scan_interval": "Intervall für Raumdaten (Temp, Feuchtigkeit, Heizleistung). WICHTIG: Wird bei aktiver 'Auto API Quota' dynamisch überschrieben und dient dann nur als Fallback bei Erschöpfung des berechneten Auto-Quota-Budgets.",
+          "presence_poll_interval": "Wie oft der Home/Away Status geprüft wird. Ein hoher Wert (z.B. 43200s/12h) spart API-Quota, falls HA-Anwesenheit genutzt wird.",
+          "slow_poll_interval": "Wie oft Batterien, Firmware, Fähigkeiten und die Geräteliste geprüft werden. 86400s (24h) wird dringend empfohlen.",
+          "offset_poll_interval": "Wie oft Temperatur-Offsets abgerufen werden. Kostet 1 API-Aufruf PRO VENTIL. 0 = deaktiviert."
         }
-      }
-    }
-  },
-  "entity": {
-    "sensor": {
-      "api_limit": {
-        "name": "API Tageslimit"
       },
-      "api_remaining": {
-        "name": "Verbleibende API-Aufrufe"
-      },
-      "api_status": {
-        "name": "API Status",
-        "state": {
-          "connected": "Verbunden",
-          "throttled": "Gedrosselt",
-          "rate_limited": "Limit erreicht"
+      "quota": {
+        "title": "API Quota & Sicherheit",
+        "description": "Konfigurieren Sie das automatische API-Management.\n[Dokumentation: Auto API Quota]({docs_url})",
+        "data": {
+          "auto_api_quota_percent": "Auto-API-Kontingent (%)",
+          "throttle_threshold": "Drossel-Schwellenwert (Sicherheits-Puffer)",
+          "disable_polling_when_throttled": "Polling deaktivieren wenn gedrosselt",
+          "refresh_after_resume": "Status nach Schedule-Resume aktualisieren"
+        },
+        "data_description": {
+          "auto_api_quota_percent": "Nutze X% der FREIEN Tagesquota für Status-Polling (0 = deaktiviert). FREI = Limit - Hintergrund-Reserve (Syncs) - Externe-Aktivität (Automationen, App-Nutzung über dem Puffer). Hybrid-Strategie: Nutzt MAX(Tagesbudget - Verbraucht, Verbleibend * X%) → System pollt IMMER weiter, auch wenn Tagesbudget überschritten.",
+          "throttle_threshold": "Reserviert N Aufrufe für ALLES außerhalb des Hijack-Hintergrund-Pollings (Automationen, Skripte, manuelle App-Nutzung). Das Polling stoppt bei Erreichen dieser Schwelle, um deren Funktion zu sichern. Empfohlen: 20. 0 = deaktiviert.",
+          "disable_polling_when_throttled": "Stoppt das periodische Polling vollständig, wenn das verbleibende Kontingent den Puffer erreicht.",
+          "refresh_after_resume": "Automatisch Zieltemperatur/State abrufen nach Resume Schedule (HVAC AUTO). Notwendig, da Zeitpläne Tado-Cloud-seitig verwaltet werden. Nutzt 1s Grace-Period um mehrere Resumes zu mergen. Kostet 1 API-Aufruf."
         }
-      }
-    },
-    "switch": {
-      "away_mode": {
-        "name": "Away Modus"
       },
       "schedule": {
-        "name": "Zeitplan"
+        "title": "Reduziertes Polling",
+        "description": "Konfigurieren Sie das Profil für reduziertes Polling (z.B. Nachtmodus).\n[Dokumentation: Sparfenster]({docs_url})",
+        "data": {
+          "reduced_polling_active": "Reduziertes Polling aktiv",
+          "reduced_polling_start": "Startzeit des Fensters",
+          "reduced_polling_end": "Endzeit des Fensters",
+          "reduced_polling_interval": "Intervall im Sparfenster (Sekunden)"
+        },
+        "data_description": {
+          "reduced_polling_active": "Aktiviert das zeitbasierte, gewichtete Polling-Profil.",
+          "reduced_polling_start": "Zeitpunkt, an dem das Sparfenster beginnt (z. B. 22:00).",
+          "reduced_polling_end": "Zeitpunkt, an dem das Sparfenster endet (z. B. 07:00).",
+          "reduced_polling_interval": "Polling-Intervall während des Sparfensters (z.B. 3600s = 1h). Auf 0 setzen für Pause."
+        }
       },
-      "child_lock": {
-        "name": "Kindersicherung"
-      }
-    },
-    "button": {
-      "manual_poll": {
-        "name": "Manueller Abruf"
-      },
-      "resume_all_schedules": {
-        "name": "Alle Zeitpläne fortsetzen"
-      },
-      "turn_off_all_zones": {
-        "name": "Alle Zonen ausschalten"
-      },
-      "boost_all_zones": {
-        "name": "Alle Zonen aufheizen"
-      },
-      "resume_schedule": {
-        "name": "Zeitplan fortsetzen"
-      }
-    },
-    "number": {
-      "temperature_offset": {
-        "name": "Temperatur-Offset"
+      "advanced": {
+        "title": "Erweitert & Debug",
+        "description": "Erweiterte Einstellungen und [tado-api-proxy Repository]({proxy_repo_url}).\n[Dokumentation: API Proxy Umgehung]({docs_url})",
+        "data": {
+          "api_proxy_url": "API-Proxy-URL (Optional)",
+          "debounce_time": "Debounce-Zeit (Sekunden)",
+          "call_jitter_enabled": "Call-Jitter aktivieren (Proxy)",
+          "jitter_percent": "Jitter-Stärke (+/- %)",
+          "debug_logging": "Debug-Logging aktivieren"
+        },
+        "data_description": {
+          "api_proxy_url": "Fortgeschritten: Basis-URL einer lokalen tado-api-proxy Instanz (z.B. http://192.168.1.5:8080). NICHT /api/v2 anhängen. Proxy handled Authentifizierung intern. Repo: https://github.com/s1adem4n/tado-api-proxy",
+          "debounce_time": "Zeitfenster um schnelle Änderungen zu sammeln bevor sie gesendet werden. Standard 5s.",
+          "call_jitter_enabled": "Fügt zufällige Verzögerungen vor API-Aufrufen ein, um Automations-Muster zu verschleiern. Nur bei Proxy-Nutzung wirksam.",
+          "jitter_percent": "Stärke der zufälligen Abweichung für Polls und Calls. Standard 10% (z.B. 60s -> 54-66s).",
+          "debug_logging": "Ausführliches Debug-Logging für die Fehlersuche aktivieren. WARNUNG: Erzeugt große Logdateien."
+        }
       }
     }
   },
@@ -140,6 +344,62 @@
     "boost_all_zones": {
       "name": "Alle Zonen aufheizen",
       "description": "Heizt alle Zonen auf 25°C auf."
+    },
+    "set_timer": {
+      "name": "Timer setzen",
+      "description": "Setzt ein manuelles Overlay mit Timer, oder kehrt automatisch zum Zeitplan zurück.",
+      "fields": {
+        "entity_id": {
+          "name": "Entität",
+          "description": "Beliebige Zonen-Entität von Tado Hijack."
+        },
+        "duration": {
+          "name": "Dauer (Minuten)",
+          "description": "Dauer in Minuten."
+        },
+        "overlay": {
+          "name": "Overlay-Modus",
+          "description": "Beendigungsmodus: 'manual' (unbegrenzt), 'next_block' (Rückkehr zum nächsten Zeitblock) oder 'presence' (bis Anwesenheitsänderung)."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Power-Status (ON/OFF)."
+        },
+        "temperature": {
+          "name": "Temperatur",
+          "description": "Zieltemperatur (optional)."
+        }
+      }
+    },
+    "set_timer_all_zones": {
+      "name": "Timer für alle Zonen setzen",
+      "description": "Setzt ein manuelles Overlay für alle Heizungs- und/oder Klimazonen gleichzeitig.",
+      "fields": {
+        "include_heating": {
+          "name": "Heizung einbeziehen",
+          "description": "Bezieht alle Heizungszonen (Thermostate) mit ein."
+        },
+        "include_ac": {
+          "name": "Klima einbeziehen",
+          "description": "Bezieht alle Klimazonen mit ein."
+        },
+        "duration": {
+          "name": "Dauer (Minuten)",
+          "description": "Dauer in Minuten."
+        },
+        "overlay": {
+          "name": "Overlay-Modus",
+          "description": "Beendigungsmodus: 'manual' (unbegrenzt), 'next_block' (Rückkehr zum nächsten Zeitblock) oder 'presence' (bis Anwesenheitsänderung)."
+        },
+        "power": {
+          "name": "Power",
+          "description": "Power-Status (ON/OFF)."
+        },
+        "temperature": {
+          "name": "Temperatur",
+          "description": "Zieltemperatur (wird je nach Zonentyp automatisch begrenzt)."
+        }
+      }
     }
   }
 }
